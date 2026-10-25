@@ -1,42 +1,43 @@
-name: Claude PR review
+name: Agent review
 
-# A code review by Claude Sonnet 5.5, paid from the Anthropic Console API credits through
-# the `ANTHROPIC_API_KEY` secret. It is a GitHub review: each finding is a comment on its
+# An advisory code review by an agent CLI (today Claude Code), paid from the Anthropic Console
+# API credits through the `ANTHROPIC_API_KEY` secret. It is a GitHub review: each finding is a comment on its
 # line, labelled "Should fix" or "Note", that the owner can answer in its thread. It is
 # advisory: never a required check, never an approval or a change request, never a merge
-# gate. What to look for beyond the defaults is in `.github/claude-review.md`.
+# gate. What to look for beyond the defaults is in `.github/agent-review.md`.
 #
-# The review kit's workflow template. Copy it with `scripts/claude-review.ts` and
-# `scripts/engine-settings.json`, record the decision in the repository's ADRs, and edit the
+# The "copy the files" workflow template. Copy it with the `src/` folder of agent-review
+# (as `scripts/agent-review/`, see docs/setup-copy.md), record the decision in the repository's ADRs, and edit the
 # trust paragraph below to say who can push. It runs narrowly:
 #   - `review`: once, when a pull request opens ready for review or leaves draft.
 #     A later push does not re-run it.
 #   - `on-demand`: when the repository owner comments on a pull request:
-#     `@claude review` re-reviews what changed since the last reviewed commit and
-#     answers the owner's replies in the open threads; `@claude review <path>…` reviews
-#     only those paths; any other `@claude …` comment is a question, answered as a comment.
+#     `@agent-review review` re-reviews what changed since the last reviewed commit and
+#     answers the owner's replies in the open threads; `@agent-review review <path>…` reviews
+#     only those paths; any other `@agent-review …` comment is a question, answered as a comment.
 #
-# Before Claude is called, `scripts/claude-review.ts` drops lockfiles, build output and
+# Before the agent is called, `scripts/agent-review/cli.ts` drops lockfiles, build output and
 # generated files, then packs the rest into batches of about 1,000 changed lines, riskiest
-# first, one `claude -p` each with its diff inside the prompt. A batch that leaves files
+# first, one agent call each with its diff inside the prompt. A batch that leaves files
 # unaccounted for is re-run once with only those files. There is no size gate: the budget
 # below bounds the run, and a file still not accounted for marks the review "partial" on
 # its first line.
 #
-# Comments come from `github-actions[bot]` through the workflow token, so the Claude
-# GitHub App does not need to be installed.
+# Comments come from `github-actions[bot]` through the workflow token, so no GitHub
+# App needs to be installed.
 #
-# Both jobs run `scripts/claude-review.ts`: Claude only reads (files, the PR, its diff),
-# and the script posts the review, capped by the budgets below. That is enough
+# Both jobs run `scripts/agent-review/cli.ts`: the agent only reads (files, the PR, its diff),
+# and the CLI posts the review, capped by the budgets below. That is enough
 # here because only the owner pushes (EDIT THIS: say who can open pull requests in this
-# repository), so everything Claude reads is trusted. A public repository needs more
+# repository), so everything the agent reads is trusted. A public repository needs more
 # before copying this file: prompt injection and outside contributors. Three things
 # already keep strangers out: fork pull requests are skipped (they get no secrets anyway),
-# only the owner's `@claude` comment starts a run, and only replies from people with
-# access reach Claude. Claude runs with `--restricted --strict-mcp-config --tools Read,Glob,Grep
-# --settings engine-settings.json`: the head's user, project and local settings (its
-# `.claude/` hooks included) are ignored, no MCP server starts, and only read tools exist.
-# Managed settings and the engine's own settings still apply. Not verified: whether the
+# only the operator's `@agent-review` comment starts a run, and only replies from people with
+# access reach the agent. Claude Code runs with `--restricted --strict-mcp-config
+# --tools Read,Glob,Grep --settings claude-code.settings.json` (docs/providers/claude-code.md):
+# the head's user, project and local settings (its `.claude/` hooks included) are ignored,
+# no MCP server starts, and only read tools exist. Managed settings and the adapter's own
+# settings still apply. Not verified: whether the
 # head's `CLAUDE.md` still loads as memory, and whether the `/proc` deny rules matter under
 # `--restricted`. Still not a sandbox: the trust assumption stays what makes this acceptable.
 
@@ -45,7 +46,7 @@ on:
     types: [opened, ready_for_review]
   # GitHub runs `issue_comment` workflows from the default branch's copy of this file. The
   # pull request that installs the workflow therefore gets only the `pull_request` review;
-  # `@claude review` and thread replies start working once the file is on the default branch.
+  # `@agent-review review` and thread replies start working once the file is on the default branch.
   issue_comment:
     types: [created]
 
@@ -60,18 +61,21 @@ env:
   # Pinned: the version is part of what was verified to work (see above). Bump it by
   # hand, and re-run a review to check.
   CLAUDE_CODE_VERSION: 2.1.304
-  # Batch size, and the most one batch, one pull request and one `@claude` question may
+  # Batch size, and the most one batch, one pull request and one `@agent-review` question may
   # spend. Past the pull request's budget the remaining batches are listed as not reviewed.
   # A pull request edits these for its own `review` run, which the trust assumption above
   # accepts.
-  CLAUDE_REVIEW_BATCH_LINES: 1000
-  CLAUDE_REVIEW_BATCH_BUDGET_USD: 0.75
-  CLAUDE_REVIEW_BUDGET_USD: 3
-  CLAUDE_REVIEW_ANSWER_BUDGET_USD: 1
+  AGENT_REVIEW_BATCH_LINES: 1000
+  AGENT_REVIEW_BATCH_BUDGET_USD: 0.75
+  AGENT_REVIEW_BUDGET_USD: 3
+  AGENT_REVIEW_ANSWER_BUDGET_USD: 1
+  # The login allowed to command the tool (EDIT THIS). The `on-demand` job `if:` checks the same
+  # login, and the CLI checks it again against the comment's author.
+  AGENT_REVIEW_OPERATOR: your-github-login
 
 jobs:
   review:
-    name: Claude review
+    name: Agent review
     # Fork and Dependabot pull requests get no secrets, so the job could only fail there.
     # Release-please pull requests are a changelog and a version bump; reviewing them would
     # only spend.
@@ -84,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another
     concurrency:
-      group: claude-review-${{ github.event.pull_request.number }}
+      group: agent-review-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     permissions:
       contents: read
@@ -112,22 +116,25 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-        run: bun scripts/claude-review.ts review "$PR"
+        run: bun scripts/agent-review/cli.ts review "$PR"
 
   on-demand:
-    name: Claude on demand
-    # `author_association == 'OWNER'` holds for user-owned repositories. In an
-    # organisation-owned repository the same person is `MEMBER`, so match the login instead
-    # (EDIT THIS: for example `github.event.comment.user.login == 'csdev19'`, with your own login).
+    name: Agent on demand
+    # EDIT THIS: replace 'your-github-login' below with the operator's login, and keep it equal
+    # to AGENT_REVIEW_OPERATOR above (a job `if:` cannot read `env`). Matching by login works
+    # for user-owned and organisation-owned repositories alike (`author_association` is `OWNER`
+    # in the first and `MEMBER` in the second). `@claude` is accepted as an alias while
+    # installed copies migrate.
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
-      github.event.comment.author_association == 'OWNER' &&
-      contains(github.event.comment.body, '@claude')
+      github.event.comment.user.login == 'your-github-login' &&
+      (contains(github.event.comment.body, '@agent-review') ||
+       contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another
     concurrency:
-      group: claude-on-demand-${{ github.event.issue.number }}
+      group: agent-on-demand-${{ github.event.issue.number }}
       cancel-in-progress: true
     permissions:
       contents: read
@@ -146,8 +153,8 @@ jobs:
             exit 1
           fi
 
-      # Claude reads the pull request head; the script that holds the key comes from
-      # the default branch, with engine-settings.json next to it. `--restricted` makes
+      # The agent reads the pull request head; the CLI that holds the key comes from
+      # the default branch, with the provider settings next to it. `--restricted` makes
       # Claude Code ignore the head's `.claude/` settings and hooks; that is not a sandbox,
       # and the trust assumption in the header still covers the rest.
       - name: Checkout the pull request head
@@ -156,11 +163,11 @@ jobs:
           ref: refs/pull/${{ github.event.issue.number }}/head
           fetch-depth: 1
 
-      - name: Checkout the default branch's script
+      - name: Checkout the default branch's CLI
         uses: actions/checkout@v4
         with:
           path: .ci-main
-          sparse-checkout: scripts
+          sparse-checkout: scripts/agent-review
           fetch-depth: 1
 
       - name: Setup Bun
@@ -173,7 +180,7 @@ jobs:
           curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # The comment reaches the script through the environment, never interpolated
+      # The comment reaches the CLI through the environment, never interpolated
       # into the shell, so its text cannot run as a command.
       - name: Review or answer
         env:
@@ -181,4 +188,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.issue.number }}
           REQUEST: ${{ github.event.comment.body }}
-        run: bun .ci-main/scripts/claude-review.ts comment "$PR"
+          AGENT_REVIEW_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+        run: bun .ci-main/scripts/agent-review/cli.ts comment "$PR"
