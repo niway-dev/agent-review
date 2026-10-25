@@ -15,7 +15,7 @@ your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Pre-release; the reusable workflow is in progress.** Nothing is tagged yet, and names
+**Pre-release; the reusable workflow is written but untested live.** Nothing is tagged yet, and names
 (environment variables, the review marker, the `@claude` mention) may still change before the
 first release. The command-line contract (`src/cli.ts`) is the next piece of work, so there is no
 `bin` entry in `package.json` yet.
@@ -30,6 +30,35 @@ There will be three ways. Only the second works today.
 2. **Copy the files (documented today).** Copy the engine, its settings file and the workflow
    template into your repository. See [docs/setup-copy.md](docs/setup-copy.md).
 3. **npm (later).** Deferred until the command-line contract is stable.
+
+## Install with the reusable workflow
+
+**Pre-release until `v1.0.0`:** no tag exists yet. Pin a commit SHA instead of `v1` until then.
+
+Add this file as `.github/workflows/agent-review.yml`, save `ANTHROPIC_API_KEY` as a repository
+secret and set your login as `operator`:
+
+```yaml
+name: Agent review
+# Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
+# `v1` floats to compatible fixes; to freeze, replace it with a full commit SHA of this repository.
+# First install: the installing pull request gets only the automatic review. `@agent-review review`
+# and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
+on:
+  pull_request: { types: [opened, ready_for_review] }
+  issue_comment: { types: [created] }
+permissions: { contents: read, pull-requests: write, issues: read }
+jobs:
+  review:
+    uses: niway-dev/agent-review/.github/workflows/review.yml@v1
+    with:
+      operator: EDIT-THIS-github-login
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Full steps, settings and updates: [docs/install.md](docs/install.md). Maintainers:
+[docs/releasing.md](docs/releasing.md).
 
 ## Security model
 

@@ -13,3 +13,8 @@ Initial import of the review engine from a private kit. Nothing is tagged yet.
 - `docs/adr/0001-distribution-and-trust.md`: why the tool is public, how it will be distributed,
   and where its trust ends.
 - `README.md`, `SECURITY.md`, `LICENSE` (GNU AGPL-3.0).
+- `.github/workflows/review.yml`: the reusable workflow (`workflow_call`). Two jobs, `review` and
+  `on-demand`, that check out the head as data and the engine at the called workflow's commit.
+- `templates/agent-review-caller.yml`: the short caller file consumers add.
+- `docs/install.md`, `docs/releasing.md`: installation and the tag rules.
+- `.github/workflows/ci.yml`: tests and actionlint for this repository.

@@ -1,0 +1,7 @@
+# actionlint does not know the `job.workflow_repository` and `job.workflow_sha` properties yet,
+# although the GitHub docs define them:
+# https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context
+paths:
+  .github/workflows/review.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'
