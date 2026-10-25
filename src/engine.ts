@@ -1,40 +1,35 @@
 /**
- * Reviews a pull request with Claude Code (`claude -p`) and posts the result as a GitHub review.
- *
- *   bun scripts/claude-review.ts review <pr> [paths…]   review it; after the first review, only
- *                                                       what changed since the last reviewed commit
- *   bun scripts/claude-review.ts comment <pr>           route the owner's @claude comment, read
- *                                                       from $REQUEST, to a review or an answer
+ * The review engine: provider-neutral. It reads a pull request through `gh`, plans batches, asks a
+ * `ProviderAdapter` to review each one, and posts the result as a GitHub review. The agent CLI
+ * itself (flags, binary, hardening) lives in `src/providers/`.
  *
  * Every changed line is read. Files nobody reviews (lockfiles, build output, generated code) are
  * dropped first. The rest are scored by risk (`riskScore`) and packed into batches of about 1,000
- * changed lines (`planBatches`), riskiest first; each batch is one `claude -p` call with its diff
- * inside the prompt, read from stdin. A batch that leaves files unaccounted for is re-run once
- * with only those files. Money bounds the run, not size: each batch has its own budget, and once
- * the pull request's budget is spent the remaining batches are listed as not reviewed. A file
- * that is still not accounted for makes the review "partial", on its first line.
+ * changed lines (`planBatches`), riskiest first; each batch is one provider call with its diff
+ * inside the prompt. A batch that leaves files unaccounted for is re-run once with only those
+ * files. Money bounds the run, not size: each batch has its own budget, and once the pull
+ * request's budget is spent the remaining batches are listed as not reviewed. A file that is
+ * still not accounted for makes the review "partial", on its first line.
  *
- * Findings become inline review comments on their lines, so the owner can answer each one in its
- * thread; a finding outside the diff goes in the review body. The review is advisory: it never
- * approves, requests changes or blocks a merge. On a re-review, Claude reads its open threads and
- * the owner's replies and answers in each thread. It never resolves one.
+ * Findings become inline review comments on their lines, so the operator can answer each one in
+ * its thread; a finding outside the diff goes in the review body. The review is advisory: it never
+ * approves, requests changes or blocks a merge. On a re-review, the agent reads its open threads
+ * and the operator's replies and answers in each thread. It never resolves one.
  *
- * What to look for beyond the defaults (correctness, security, the repository's CLAUDE.md or
- * AGENTS.md) comes from `.github/claude-review.md` when the repository has one.
+ * What to look for beyond the defaults comes from `.github/agent-review.md` when the repository
+ * has one (`.github/claude-review.md` is still read, with a notice).
  *
- * Claude only reads: no shell, no GitHub token, `--restricted` (the head's `.claude/` settings and
- * hooks are ignored), no MCP servers, `/proc` denied. This script holds the tokens and
- * refuses to post text containing the API key. That is best-effort, not a sandbox: it relies on
- * the consumer repository's trust assumption (only the owner pushes), stated in its workflow.
- *
- * Needs GH_TOKEN, ANTHROPIC_API_KEY, GITHUB_REPOSITORY and `claude` on the PATH. With
- * CLAUDE_REVIEW_DRY_RUN=1 it reads GitHub but prints the review instead of posting it, and runs
- * `claude` with whatever login the machine has, so a change to the kit can be tried locally.
+ * The engine holds the GitHub token and posts; the agent only reads and gets no token. The engine
+ * refuses to post text the provider says holds a credential. That is best-effort, not a sandbox:
+ * it relies on the consumer repository's trust assumption (only trusted people push).
+ * The command-line entry point is `src/cli.ts`.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { EngineConfig } from "./config";
+import type { ProviderAdapter } from "./providers/types";
 
 export interface PrFile {
   filename: string;
@@ -96,16 +91,21 @@ export const DEFAULT_EXCLUDE = [
   "**/worker-configuration.d.ts",
 ];
 
-const MARKER = /<!-- claude-review sha=([A-Za-z0-9]+) -->/;
-const KEY_SHAPE = /sk-ant-[a-z0-9]+-[A-Za-z0-9_-]{20,}/;
+// The old marker is still read so repositories reviewed before the rename keep their incremental state.
+const MARKER = /<!-- (?:agent-review|claude-review) sha=([A-Za-z0-9]+) -->/;
 const short = (sha: string) => sha.slice(0, 7);
 const label = (f: Finding) =>
   `**${f.severity === "should_fix" ? "Should fix" : "Note"} (${f.category}): ${f.title}**`;
 const at = (f: { path: string; line: number }) => (f.line > 0 ? `${f.path}:${f.line}` : f.path);
 
-export function parseCommand(body: string): Command | null {
-  // Only the rest of the first line: "@claude review\n\nthanks" asks for a review, not a path.
-  const match = body.match(/@claude\b(.*)/);
+/** The mention that always works besides the configured keyword, during the migration. */
+export const MENTION_ALIAS = "@claude";
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function parseCommand(body: string, keyword = "@agent-review"): Command | null {
+  // Only the rest of the first line: "@agent-review review\n\nthanks" asks for a review, not a path.
+  const names = [keyword, MENTION_ALIAS].map(escapeRegExp).join("|");
+  const match = body.match(new RegExp(`(?:${names})(?![\\w-])(.*)`));
   if (!match) return null;
   const words = match[1].trim().split(/\s+/).filter(Boolean);
   if (words[0]?.toLowerCase() === "review") return { kind: "review", paths: words.slice(1) };
@@ -115,7 +115,7 @@ export function parseCommand(body: string): Command | null {
 const underPath = (name: string, path: string) =>
   name === path || name.startsWith(path.endsWith("/") ? path : `${path}/`);
 
-/** Words after `@claude review` that name no changed file ("again", "please") are not paths. */
+/** Words after `review` in a request that name no changed file ("again", "please") are not paths. */
 export function resolveScope(words: string[], filenames: string[]) {
   const paths = words.filter((w) => filenames.some((f) => underPath(f, w)));
   return { paths, ignored: words.filter((w) => !paths.includes(w)) };
@@ -350,7 +350,7 @@ export function commentableLines(patch: string): Set<number> {
 }
 
 /**
- * The diff Claude reads, with each line's number in the file at the head commit on the left
+ * The diff the agent reads, with each line's number in the file at the head commit on the left
  * (blank for removed lines), so the `line` it reports is one GitHub can anchor a thread to.
  */
 export function annotateDiff(files: PrFile[]) {
@@ -377,7 +377,7 @@ export function annotateDiff(files: PrFile[]) {
   return out.join("\n");
 }
 
-export const marker = (sha: string) => `<!-- claude-review sha=${sha} -->`;
+export const marker = (sha: string) => `<!-- agent-review sha=${sha} -->`;
 
 export const readMarker = (body: string) => body.match(MARKER)?.[1] ?? null;
 
@@ -417,12 +417,17 @@ export function buildReview(input: {
   files: PrFile[];
   headSha: string;
   since: string | null;
-  /** Limited to `@claude review <paths>`. */
+  /** Limited to `<mention> review <paths>`. */
   scoped: boolean;
   costUsd: number;
   batches?: BatchReport[];
+  /** From `ProviderAdapter.modelLabel()`, for the footer. */
+  modelLabel: string;
+  /** The configured mention keyword, for the hint on how to ask for the rest. */
+  mention?: string;
 }): Review {
-  const { output, files, headSha, since, scoped, costUsd, batches = [] } = input;
+  const { output, files, headSha, since, scoped, costUsd, batches = [], modelLabel } = input;
+  const mention = input.mention ?? "@agent-review";
   const commentable = new Map(files.map((f) => [f.filename, commentableLines(f.patch ?? "")]));
   const comments: InlineComment[] = [];
   const outsideDiff: Finding[] = [];
@@ -447,11 +452,11 @@ export function buildReview(input: {
   const fullList = list.join(", ");
   if (notReviewed.length > 0) {
     parts.push(
-      `⚠️ **Partial review**: Claude reviewed ${expected.length - notReviewed.length} of ${expected.length} files of ${scope}, at \`${short(headSha)}\`. Not reviewed: ${fullList}. Ask \`@claude review <paths>\` for the rest.`,
+      `⚠️ **Partial review**: the agent reviewed ${expected.length - notReviewed.length} of ${expected.length} files of ${scope}, at \`${short(headSha)}\`. Not reviewed: ${fullList}. Ask \`${mention} review <paths>\` for the rest.`,
     );
   } else {
     parts.push(
-      `**Claude review** of ${scope}, at \`${short(headSha)}\`: all ${expected.length} files reviewed.`,
+      `**Agent review** of ${scope}, at \`${short(headSha)}\`: all ${expected.length} files reviewed.`,
     );
   }
   const fixes = output.findings.filter((f) => f.severity === "should_fix").length;
@@ -475,8 +480,8 @@ export function buildReview(input: {
     );
   }
   const batchCount = batches.length > 1 ? ` · ${batches.length} batches` : "";
-  parts.push(`<sub>Claude Sonnet 5.5${batchCount} · $${costUsd.toFixed(2)}</sub>`);
-  // The next `@claude review` starts from this commit, so only a review that covered everything
+  parts.push(`<sub>${modelLabel}${batchCount} · $${costUsd.toFixed(2)}</sub>`);
+  // The next `review` request starts from this commit, so only a review that covered everything
   // may move it; a scoped or partial one would leave the rest never reviewed.
   if (!scoped && notReviewed.length === 0) parts.push(marker(headSha));
   const body = parts.join("\n\n");
@@ -501,12 +506,8 @@ export function moveCommentsToBody(review: Review): Review {
   return { body, comments: [] };
 }
 
-export function leaksKey(texts: string[], key: string) {
-  return texts.some((t) => (key !== "" && t.includes(key)) || KEY_SHAPE.test(t));
-}
-
 // ---------------------------------------------------------------------------------------------
-// GitHub and Claude: everything below talks to the network and is exercised by the workflow.
+// GitHub and the provider: everything below talks to the network and is exercised by the workflow.
 
 const SCHEMA = {
   type: "object",
@@ -564,24 +565,38 @@ change that contradicts an accepted decision record without superseding it, and 
 worth the author's time. Skip praise, style a formatter would catch, and speculation you cannot
 tie to the diff. Write in English.`;
 
+export const FOCUS_PATH = ".github/agent-review.md";
+/** The path used before the rename; still read, with a notice. */
+export const OLD_FOCUS_PATH = ".github/claude-review.md";
+
 /** The repository's own review focus, appended to the rules when it exists. */
-function repoFocus() {
-  const path = ".github/claude-review.md";
+function repoFocus(warn: (line: string) => void) {
+  let path = FOCUS_PATH;
+  if (!existsSync(path) && existsSync(OLD_FOCUS_PATH)) {
+    warn(`${OLD_FOCUS_PATH} is deprecated; rename it to ${FOCUS_PATH}.`);
+    path = OLD_FOCUS_PATH;
+  }
   return existsSync(path)
     ? `\n\nThis repository's review focus (${path}):\n\n${readFileSync(path, "utf8")}`
     : "";
 }
 
-function env(name: string, fallback?: string) {
-  const value = process.env[name] ?? fallback;
-  if (value === undefined || value === "") throw new Error(`${name} is not set`);
-  return value;
-}
+/** Runs `gh` and returns stdout; swapped for a stub in tests. */
+export type GhFn = (args: string[], input?: string) => string;
 
-function gh(args: string[], input?: string) {
+export const defaultGh: GhFn = (args, input) => {
   const run = spawnSync("gh", args, { input, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   if (run.status !== 0) throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${run.stderr}`);
   return run.stdout;
+};
+
+/** Everything the engine needs from outside: GitHub, the agent, settings and output. */
+export interface Deps {
+  gh: GhFn;
+  provider: ProviderAdapter;
+  config: EngineConfig;
+  log: (line: string) => void;
+  warn: (line: string) => void;
 }
 
 const jsonLines = <T>(text: string) =>
@@ -592,14 +607,14 @@ const jsonLines = <T>(text: string) =>
 
 // `gh --jq` prints string results raw, like `jq -r`: `@json` of an object prints the object's
 // JSON, and `@json` of a string prints the quoted string. One JSON value per line either way.
-export function listFiles(repo: string, pr: number): PrFile[] {
+export function listFiles(gh: GhFn, repo: string, pr: number): PrFile[] {
   const jq = ".[] | {filename, additions, deletions, patch} | @json";
   return jsonLines<PrFile>(
     gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/files`, "--jq", jq]),
   );
 }
 
-export function lastReviewedSha(repo: string, pr: number) {
+export function lastReviewedSha(gh: GhFn, repo: string, pr: number) {
   const jq = '.[] | select(.user.login == "github-actions[bot]") | .body | @json';
   const bodies = jsonLines<string>(
     gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/reviews`, "--jq", jq]),
@@ -612,7 +627,7 @@ export function lastReviewedSha(repo: string, pr: number) {
   );
 }
 
-export function compareFiles(repo: string, base: string, head: string) {
+export function compareFiles(gh: GhFn, repo: string, base: string, head: string) {
   const jq = "{status, files: [.files[] | {filename, additions, deletions, patch}]}";
   return JSON.parse(gh(["api", `repos/${repo}/compare/${base}...${head}`, "--jq", jq])) as {
     status: string;
@@ -637,9 +652,9 @@ export interface RawThread {
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 /**
- * The kit's own unresolved threads, with the replies Claude may read. On a public repository
+ * The tool's own unresolved threads, with the replies the agent may read. On a public repository
  * anyone can reply in a thread, so only replies by people with access reach the model: anything
- * else is untrusted text in Claude's context.
+ * else is untrusted text in the agent's context.
  */
 export function openBotThreads(threads: RawThread[]) {
   return threads
@@ -656,7 +671,7 @@ export function openBotThreads(threads: RawThread[]) {
     }));
 }
 
-export function openThreads(repo: string, pr: number) {
+export function openThreads(gh: GhFn, repo: string, pr: number) {
   const [owner, name] = repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
@@ -677,16 +692,14 @@ export function openThreads(repo: string, pr: number) {
   return openBotThreads(JSON.parse(raw).data.repository.pullRequest.reviewThreads.nodes);
 }
 
-const DRY_RUN = process.env.CLAUDE_REVIEW_DRY_RUN === "1";
-
-function postReview(repo: string, pr: number, headSha: string, review: Review) {
-  if (DRY_RUN) {
-    console.log(`--- review at ${short(headSha)} ---\n${review.body}`);
-    for (const c of review.comments) console.log(`--- ${c.path}:${c.line} ---\n${c.body}`);
+function postReview(deps: Deps, repo: string, pr: number, headSha: string, review: Review) {
+  if (deps.config.dryRun) {
+    deps.log(`--- review at ${short(headSha)} ---\n${review.body}`);
+    for (const c of review.comments) deps.log(`--- ${c.path}:${c.line} ---\n${c.body}`);
     return;
   }
   const send = (r: Review) =>
-    gh(
+    deps.gh(
       ["api", "-X", "POST", `repos/${repo}/pulls/${pr}/reviews`, "--input", "-"],
       JSON.stringify({ commit_id: headSha, event: "COMMENT", body: r.body, comments: r.comments }),
     );
@@ -694,95 +707,9 @@ function postReview(repo: string, pr: number, headSha: string, review: Review) {
     send(review);
   } catch (error) {
     if (review.comments.length === 0) throw error;
-    console.error(`GitHub refused the inline comments; posting them in the body. ${error}`);
+    deps.warn(`GitHub refused the inline comments; posting them in the body. ${error}`);
     send(moveCommentsToBody(review));
   }
-}
-
-/** The engine's own settings, next to the script (consumer layout) or one level up (this repo). */
-export function findEngineSettings(scriptDir: string) {
-  for (const path of [
-    join(scriptDir, "engine-settings.json"),
-    join(scriptDir, "..", "engine-settings.json"),
-  ]) {
-    if (existsSync(path)) return path;
-  }
-  // Never run without it: the deny rules and the hardening flags come together.
-  throw new Error(`engine-settings.json not found next to ${scriptDir}`);
-}
-
-/**
- * The `claude` arguments; the prompt itself goes through stdin, never as an argument. `--restricted`
- * drops the code-running tools and ignores the head's user, project and local settings (so its
- * `.claude/` hooks do not load); `--strict-mcp-config` skips MCP servers; `--tools` names the only
- * tools that exist. `--allowedTools` and `--disallowedTools` stay as before. The `/proc` deny
- * rules are not verified under `--restricted`: it confines file tools to the working directories,
- * which may already exclude `/proc`, but nothing here proves it.
- */
-export function buildClaudeArgs(opts: {
-  dir: string;
-  budgetUsd: number;
-  model: string;
-  settings: string;
-  schema?: object;
-}) {
-  return [
-    "-p",
-    "--model",
-    opts.model,
-    "--max-budget-usd",
-    String(opts.budgetUsd),
-    "--restricted",
-    "--strict-mcp-config",
-    "--tools",
-    "Read,Glob,Grep",
-    "--settings",
-    opts.settings,
-    "--add-dir",
-    opts.dir,
-    "--allowedTools",
-    "Read,Glob,Grep",
-    "--disallowedTools",
-    "Bash,Read(//proc/**),Grep(//proc/**),Glob(//proc/**)",
-    "--output-format",
-    "json",
-    ...(opts.schema ? ["--json-schema", JSON.stringify(opts.schema)] : []),
-  ];
-}
-
-/** The prompt goes through stdin: a batch's diff in an argument would hit Linux's 128 KB limit. */
-function runClaude(prompt: string, dir: string, budgetUsd: number, schema?: object) {
-  const childEnv = { ...process.env };
-  delete childEnv.GH_TOKEN;
-  delete childEnv.GITHUB_TOKEN;
-  const args = buildClaudeArgs({
-    dir,
-    budgetUsd,
-    schema,
-    model: env("CLAUDE_REVIEW_MODEL", "claude-sonnet-5-5"),
-    settings: findEngineSettings(import.meta.dir),
-  });
-  const run = spawnSync("claude", args, {
-    input: prompt,
-    env: childEnv,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (run.error || !run.stdout) {
-    throw new Error(`claude did not run (status ${run.status}): ${run.error ?? run.stderr}`);
-  }
-  const result = JSON.parse(run.stdout) as {
-    is_error: boolean;
-    subtype: string;
-    num_turns: number;
-    total_cost_usd: number;
-    duration_ms: number;
-    result?: string;
-    structured_output?: ReviewOutput;
-  };
-  const { is_error, subtype, num_turns, total_cost_usd, duration_ms } = result;
-  console.log(JSON.stringify({ is_error, subtype, num_turns, total_cost_usd, duration_ms }));
-  return result;
 }
 
 /**
@@ -800,63 +727,63 @@ export function attempt<T>(
   }
 }
 
-function refuseLeak(texts: string[]) {
-  if (leaksKey(texts, process.env.ANTHROPIC_API_KEY ?? "")) {
-    throw new Error("The output contains something shaped like an Anthropic key; not posting it.");
+function refuseLeak(deps: Deps, texts: string[]) {
+  if (deps.provider.leaksSecret(texts)) {
+    throw new Error("The output contains something shaped like a provider credential; not posting it.");
   }
 }
 
-function review(repo: string, pr: number, words: string[]) {
+export function review(deps: Deps, repo: string, pr: number, words: string[]) {
+  const { gh, config } = deps;
   const meta = JSON.parse(
     gh(["pr", "view", String(pr), "-R", repo, "--json", "headRefOid,title,body,author"]),
   );
   const headSha: string = meta.headRefOid;
-  const bodyOnly = (body: string) => postReview(repo, pr, headSha, { body, comments: [] });
+  const bodyOnly = (body: string) => postReview(deps, repo, pr, headSha, { body, comments: [] });
 
-  const prFiles = listFiles(repo, pr);
+  const prFiles = listFiles(gh, repo, pr);
   const { paths, ignored } = resolveScope(
     words,
     prFiles.map((f) => f.filename),
   );
   if (ignored.length > 0)
-    console.log(`Not paths in this pull request, ignored: ${ignored.join(" ")}`);
-  const last = lastReviewedSha(repo, pr);
+    deps.log(`Not paths in this pull request, ignored: ${ignored.join(" ")}`);
+  const last = lastReviewedSha(gh, repo, pr);
   if (last === headSha && paths.length === 0) {
     bodyOnly(
-      `Already reviewed at \`${short(headSha)}\`. Push changes, or ask \`@claude review <paths>\`.`,
+      `Already reviewed at \`${short(headSha)}\`. Push changes, or ask \`${config.mention} review <paths>\`.`,
     );
     return;
   }
   let since: string | null = null;
   let files = prFiles;
   if (last && paths.length === 0) {
-    const cmp = compareFiles(repo, last, headSha);
+    const cmp = compareFiles(gh, repo, last, headSha);
     if (cmp.status === "ahead") {
       since = last;
       files = cmp.files;
     } else {
-      console.log(
+      deps.log(
         `The last reviewed commit ${short(last)} is not behind the head (${cmp.status}); full review.`,
       );
     }
   }
 
-  const extra = (process.env.CLAUDE_REVIEW_EXCLUDE ?? "").split(",").filter(Boolean);
-  const { kept, dropped } = filterFiles(files, [...DEFAULT_EXCLUDE, ...extra], paths);
+  const { kept, dropped } = filterFiles(files, [...DEFAULT_EXCLUDE, ...config.exclude], paths);
   if (kept.length === 0) {
     bodyOnly(
       `Nothing to review at \`${short(headSha)}\`: the ${dropped.length} changed file(s) are all lockfiles, build output or generated, or outside the requested paths.`,
     );
     return;
   }
-  const totalBudget = Number(env("CLAUDE_REVIEW_BUDGET_USD", "3"));
-  const batchBudget = Number(env("CLAUDE_REVIEW_BATCH_BUDGET_USD", "0.75"));
+  const totalBudget = config.budgetUsd;
+  const batchBudget = config.batchBudgetUsd;
   const batches = planBatches(kept, {
-    maxLines: Number(env("CLAUDE_REVIEW_BATCH_LINES", "1000")),
+    maxLines: config.batchLines,
     // About 40k tokens at 3.5 characters a token.
-    maxChars: Number(env("CLAUDE_REVIEW_BATCH_CHARS", "140000")),
+    maxChars: config.batchChars,
   });
-  const threads = last ? openThreads(repo, pr) : [];
+  const threads = last ? openThreads(gh, repo, pr) : [];
   const threadsByBatch = assignThreads(threads, batches);
   const everyFile = kept.map((f) => `- ${f.filename} +${f.additions} −${f.deletions}`).join("\n");
   const context = { pr, repo, headSha, since, paths, dropped: dropped.length, everyFile, meta };
@@ -886,6 +813,7 @@ function review(repo: string, pr: number, words: string[]) {
       return;
     }
     const first = reviewBatch(
+      deps,
       context,
       batch.files,
       threadsByBatch[i],
@@ -909,6 +837,7 @@ function review(repo: string, pr: number, words: string[]) {
     const gaps = batchGaps(batch.files, first.output);
     if (gaps.length > 0 && remaining() >= MIN_BATCH_USD) {
       const retry = reviewBatch(
+        deps,
         context,
         gaps,
         [],
@@ -939,11 +868,11 @@ function review(repo: string, pr: number, words: string[]) {
   if (parts.length === 0) {
     if (budgetError) {
       bodyOnly(
-        `**Claude ran out of its budget** ($${batchBudget} a batch, $${totalBudget} the pull request) before finishing any batch: nothing here was reviewed reliably. Review part of it: \`@claude review <path> [path…]\`.`,
+        `**The agent ran out of its budget** ($${batchBudget} a batch, $${totalBudget} the pull request) before finishing any batch: nothing here was reviewed reliably. Review part of it: \`${config.mention} review <path> [path…]\`.`,
       );
       return;
     }
-    throw new Error("Claude did not return a review for any batch.");
+    throw new Error("The agent did not return a review for any batch.");
   }
   const merged = mergeOutputs(parts);
   for (const path of notRun)
@@ -957,16 +886,22 @@ function review(repo: string, pr: number, words: string[]) {
     scoped: paths.length > 0,
     costUsd: spent,
     batches: reports,
+    modelLabel: deps.provider.modelLabel(),
+    mention: config.mention,
   });
   // Only threads the script handed over: an id the model made up would reply elsewhere.
   const known = new Set(threads.map((t) => t.comment_id));
   const replies = merged.thread_replies.filter((r) => known.has(r.comment_id));
-  refuseLeak([built.body, ...built.comments.map((c) => c.body), ...replies.map((r) => r.reply)]);
-  postReview(repo, pr, headSha, built);
+  refuseLeak(deps, [
+    built.body,
+    ...built.comments.map((c) => c.body),
+    ...replies.map((r) => r.reply),
+  ]);
+  postReview(deps, repo, pr, headSha, built);
   for (const r of replies) {
     const label = r.status === "addressed" ? "Looks addressed" : "Still open";
-    if (DRY_RUN) {
-      console.log(`--- reply to ${r.comment_id}: ${label} ---\n${r.reply}`);
+    if (config.dryRun) {
+      deps.log(`--- reply to ${r.comment_id}: ${label} ---\n${r.reply}`);
       continue;
     }
     gh([
@@ -1044,15 +979,16 @@ ${annotateDiff(files)}
 </diff>`;
 }
 
-/** One `claude -p` over one batch, with the batch's diff inside the prompt. */
+/** One provider call over one batch, with the batch's diff inside the prompt. */
 function reviewBatch(
+  deps: Deps,
   ctx: ReviewContext,
   files: PrFile[],
   threads: ReturnType<typeof openBotThreads>,
   part: { index: number; total: number; retry?: boolean },
   budgetUsd: number,
 ) {
-  const dir = mkdtempSync(join(tmpdir(), "claude-review-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-review-"));
   writeFileSync(
     join(dir, "pr.json"),
     JSON.stringify(
@@ -1062,35 +998,65 @@ function reviewBatch(
     ),
   );
   writeFileSync(join(dir, "threads.json"), JSON.stringify(threads, null, 2));
-  const prompt = buildBatchPrompt(ctx, files, threads.length > 0, part, dir, repoFocus());
+  const prompt = buildBatchPrompt(
+    ctx,
+    files,
+    threads.length > 0,
+    part,
+    dir,
+    repoFocus(deps.warn),
+  );
 
-  const call = attempt(() => runClaude(prompt, dir, budgetUsd, SCHEMA), budgetUsd);
+  const call = attempt(() => runProvider(deps, prompt, dir, budgetUsd, SCHEMA), budgetUsd);
   if (!call.ok) {
-    console.error(`A batch call failed: ${call.error}`);
+    deps.warn(`A batch call failed: ${call.error}`);
     return { output: undefined, budget: false, turns: 0, costUsd: call.costUsd, failed: true };
   }
   const result = call.value;
-  const output = !result.is_error ? result.structured_output : undefined;
+  const output = !result.isError ? (result.structuredOutput as ReviewOutput | undefined) : undefined;
   return {
     output,
-    budget: /budget/i.test(result.subtype),
-    turns: result.num_turns,
-    costUsd: result.total_cost_usd ?? 0,
+    budget: result.terminalReason === "budget",
+    turns: result.turns,
+    costUsd: result.costUsd,
     failed: false,
   };
 }
 
-function answer(repo: string, pr: number, question: string) {
-  const dir = mkdtempSync(join(tmpdir(), "claude-answer-"));
+/** The prompt goes through stdin: a batch's diff in an argument would hit Linux's 128 KB limit. */
+function runProvider(deps: Deps, prompt: string, dir: string, budgetUsd: number, schema?: object) {
+  const result = deps.provider.run({
+    prompt,
+    cwd: process.cwd(),
+    addDirs: [dir],
+    allowedTools: ["read", "glob", "grep"],
+    maxBudgetUsd: budgetUsd,
+    outputSchema: schema,
+    promptViaStdin: true,
+  });
+  deps.log(
+    JSON.stringify({
+      is_error: result.isError,
+      terminal_reason: result.terminalReason,
+      turns: result.turns,
+      cost_usd: result.costUsd,
+      duration_ms: result.durationMs,
+    }),
+  );
+  return result;
+}
+
+export function answer(deps: Deps, repo: string, pr: number, question: string) {
+  const dir = mkdtempSync(join(tmpdir(), "agent-answer-"));
   writeFileSync(
     join(dir, "pr.json"),
-    gh(["pr", "view", String(pr), "-R", repo, "--json", "title,body,files"]),
+    deps.gh(["pr", "view", String(pr), "-R", repo, "--json", "title,body,files"]),
   );
-  writeFileSync(join(dir, "pr.diff"), gh(["pr", "diff", String(pr), "-R", repo]));
+  writeFileSync(join(dir, "pr.diff"), deps.gh(["pr", "diff", String(pr), "-R", repo]));
   const prompt = `This is pull request #${pr} in ${repo}, checked out at its head. Its title, body and file
 list are in ${dir}/pr.json and its diff in ${dir}/pr.diff. Read CLAUDE.md first.
 
-The repository owner asked on the pull request:
+The repository operator asked on the pull request:
 
 <request>
 ${question}
@@ -1099,33 +1065,30 @@ ${question}
 Answer it. Your final message is posted verbatim as the comment, so it holds the answer and
 nothing else. Write in English.`;
   // One question is one call, with the budget a whole review had before batches: $1.
-  const result = runClaude(prompt, dir, Number(env("CLAUDE_REVIEW_ANSWER_BUDGET_USD", "1")));
-  if (result.is_error || !result.result)
-    throw new Error(`Claude did not answer (${result.subtype}).`);
-  const body = `${result.result}\n\n<sub>Claude Sonnet 5.5 · $${result.total_cost_usd.toFixed(2)}</sub>`;
-  refuseLeak([body]);
-  if (DRY_RUN) {
-    console.log(body);
+  const result = runProvider(deps, prompt, dir, deps.config.answerBudgetUsd);
+  if (result.isError || !result.text)
+    throw new Error(`The agent did not answer (${result.terminalReason}).`);
+  const body = `${result.text}\n\n<sub>${deps.provider.modelLabel()} · $${result.costUsd.toFixed(2)}</sub>`;
+  refuseLeak(deps, [body]);
+  if (deps.config.dryRun) {
+    deps.log(body);
     return;
   }
-  gh(["pr", "comment", String(pr), "-R", repo, "--body-file", "-"], body);
+  deps.gh(["pr", "comment", String(pr), "-R", repo, "--body-file", "-"], body);
 }
 
-if (import.meta.main) {
-  if (!DRY_RUN) env("ANTHROPIC_API_KEY");
-  env("GH_TOKEN");
-  // Before any call is paid for: a missing settings file would otherwise fail every batch.
-  findEngineSettings(import.meta.dir);
-  const repo = env("GITHUB_REPOSITORY");
-  const [mode, prArg, ...rest] = process.argv.slice(2);
-  const pr = Number(prArg);
-  if (!Number.isInteger(pr) || pr <= 0)
-    throw new Error("usage: claude-review.ts review|comment <pr> [paths…]");
-  if (mode === "review") review(repo, pr, rest);
-  else if (mode === "comment") {
-    const request = env("REQUEST");
-    const command = parseCommand(request);
-    if (command?.kind === "review") review(repo, pr, command.paths);
-    else if (command) answer(repo, pr, request);
-  } else throw new Error("usage: claude-review.ts review|comment <pr> [paths…]");
+/**
+ * The `comment` command: routes the operator's comment to a review, an answer or nothing.
+ * `author` is the comment's author when the caller knows it; with an operator configured, anyone
+ * else is ignored (the workflow checks this too).
+ */
+export function comment(deps: Deps, repo: string, pr: number, request: string, author?: string) {
+  const { operator } = deps.config;
+  if (author && operator && author.toLowerCase() !== operator.toLowerCase()) {
+    deps.warn(`Comment by ${author}, not the operator ${operator}; nothing to do.`);
+    return;
+  }
+  const command = parseCommand(request, deps.config.mention);
+  if (command?.kind === "review") review(deps, repo, pr, command.paths);
+  else if (command) answer(deps, repo, pr, request);
 }

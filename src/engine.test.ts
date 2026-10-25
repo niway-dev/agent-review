@@ -3,9 +3,7 @@ import {
   annotateDiff,
   attempt,
   buildBatchPrompt,
-  buildClaudeArgs,
   type ReviewContext,
-  findEngineSettings,
   resolveScope,
   type Finding,
   type PrFile,
@@ -22,15 +20,14 @@ import {
   mergeOutputs,
   planBatches,
   riskScore,
-  leaksKey,
   marker,
   moveCommentsToBody,
   openBotThreads,
   parseCommand,
   readMarker,
-} from "./claude-review";
+} from "./engine";
 
-// Synthetic pull requests only: these tests never call GitHub or Claude.
+// Synthetic pull requests only: these tests never call GitHub or an agent.
 const file = (filename: string, additions: number, deletions = 0, patch = ""): PrFile => ({
   filename,
   additions,
@@ -49,26 +46,45 @@ const output = (over: Partial<ReviewOutput> = {}): ReviewOutput => ({
 
 describe("parseCommand", () => {
   test("reads a review request, with or without paths", () => {
-    expect(parseCommand("@claude review")).toEqual({ kind: "review", paths: [] });
-    expect(parseCommand("@claude review apps/desktop/src/main docs/")).toEqual({
+    expect(parseCommand("@agent-review review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@agent-review review apps/api/src/main docs/")).toEqual({
       kind: "review",
-      paths: ["apps/desktop/src/main", "docs/"],
+      paths: ["apps/api/src/main", "docs/"],
     });
   });
 
+  test("accepts @claude as an alias for the configured keyword", () => {
+    expect(parseCommand("@claude review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@claude review docs/")).toEqual({ kind: "review", paths: ["docs/"] });
+    expect(parseCommand("@claude why is this async?")).toEqual({ kind: "answer" });
+  });
+
+  test("uses the configured keyword, and still accepts the alias", () => {
+    expect(parseCommand("@reviewer review src/", "@reviewer")).toEqual({
+      kind: "review",
+      paths: ["src/"],
+    });
+    expect(parseCommand("@claude review", "@reviewer")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@agent-review review", "@reviewer")).toBeNull();
+    // Regex characters in a keyword are literal.
+    expect(parseCommand("@a.b review", "@a.b")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@aXb review", "@a.b")).toBeNull();
+  });
+
   test("reads only the first line, so a trailing sentence is not a path", () => {
-    expect(parseCommand("@claude review again\n\nthanks")).toEqual({
+    expect(parseCommand("@agent-review review again\n\nthanks")).toEqual({
       kind: "review",
       paths: ["again"],
     });
   });
 
-  test("treats any other @claude comment as a question", () => {
-    expect(parseCommand("@claude why is this async?")).toEqual({ kind: "answer" });
+  test("treats any other mention as a question", () => {
+    expect(parseCommand("@agent-review why is this async?")).toEqual({ kind: "answer" });
   });
 
-  test("ignores comments that do not mention @claude", () => {
-    expect(parseCommand("ok, merging")).toBeNull();
+  test("ignores comments that do not mention the tool", () => {
+    expect(parseCommand("looks good, thanks")).toBeNull();
+    expect(parseCommand("@agent-reviewer review")).toBeNull();
   });
 });
 
@@ -76,31 +92,31 @@ describe("filterFiles", () => {
   const files = [
     file("bun.lock", 900),
     file("apps/web/dist/index.js", 400),
-    file("apps/desktop/src/main/index.ts", 20),
+    file("apps/api/src/main/index.ts", 20),
     file("docs/adr/0066-x.md", 30),
   ];
 
   test("drops lockfiles and build output by default", () => {
     const { kept, dropped } = filterFiles(files, ["bun.lock", "**/dist/**"], []);
     expect(kept.map((f) => f.filename)).toEqual([
-      "apps/desktop/src/main/index.ts",
+      "apps/api/src/main/index.ts",
       "docs/adr/0066-x.md",
     ]);
     expect(dropped.map((f) => f.filename)).toEqual(["bun.lock", "apps/web/dist/index.js"]);
   });
 
   test("keeps only the requested paths when the review is scoped", () => {
-    const { kept } = filterFiles(files, ["bun.lock"], ["apps/desktop/src/main"]);
-    expect(kept.map((f) => f.filename)).toEqual(["apps/desktop/src/main/index.ts"]);
+    const { kept } = filterFiles(files, ["bun.lock"], ["apps/api/src/main"]);
+    expect(kept.map((f) => f.filename)).toEqual(["apps/api/src/main/index.ts"]);
   });
 });
 
 describe("resolveScope", () => {
-  const names = ["apps/desktop/src/main/index.ts", "docs/adr/0067-x.md"];
+  const names = ["apps/api/src/main/index.ts", "docs/adr/0067-x.md"];
 
   test("keeps a word that names a changed file or directory", () => {
-    expect(resolveScope(["apps/desktop", "docs/adr/0067-x.md"], names)).toEqual({
-      paths: ["apps/desktop", "docs/adr/0067-x.md"],
+    expect(resolveScope(["apps/api", "docs/adr/0067-x.md"], names)).toEqual({
+      paths: ["apps/api", "docs/adr/0067-x.md"],
       ignored: [],
     });
   });
@@ -129,27 +145,27 @@ describe("annotateDiff", () => {
 
 describe("fileKind", () => {
   test("tells production code from tests and documentation", () => {
-    expect(fileKind("apps/desktop/src/main/session/session-manager.ts")).toBe("code");
-    expect(fileKind("apps/desktop/src/main/session/session-manager.test.ts")).toBe("test");
-    expect(fileKind("apps/desktop/src/renderer/src/test/fake-api.ts")).toBe("test");
-    expect(fileKind("apps/desktop/src/renderer/src/features/thread/test-thread-render.tsx")).toBe(
+    expect(fileKind("apps/api/src/main/session/session-manager.ts")).toBe("code");
+    expect(fileKind("apps/api/src/main/session/session-manager.test.ts")).toBe("test");
+    expect(fileKind("apps/api/src/renderer/src/test/fake-api.ts")).toBe("test");
+    expect(fileKind("apps/api/src/renderer/src/features/thread/test-thread-render.tsx")).toBe(
       "test",
     );
-    expect(fileKind("docs/adr/0081-call-audio.md")).toBe("docs");
-    expect(fileKind("apps/documentation/src/content/docs/desktop/flow/home.mdx")).toBe("docs");
-    expect(fileKind("apps/desktop/src/renderer/src/features/home/home.module.css")).toBe("docs");
+    expect(fileKind("docs/adr/0081-export-format.md")).toBe("docs");
+    expect(fileKind("apps/documentation/src/content/docs/api/flow/home.mdx")).toBe("docs");
+    expect(fileKind("apps/api/src/renderer/src/features/home/home.module.css")).toBe("docs");
     expect(fileKind("packages/i18n/messages/en.json")).toBe("docs");
   });
 });
 
 describe("riskScore", () => {
   test("ranks process boundaries and CI above ordinary code, and tests and docs last", () => {
-    const ipc = riskScore("apps/desktop/src/main/ipc/settings.ipc.ts");
-    const workflow = riskScore(".github/workflows/claude-review.yml");
-    const main = riskScore("apps/desktop/src/main/session/session-manager.ts");
-    const renderer = riskScore("apps/desktop/src/renderer/src/features/widget/widget.tsx");
-    const test = riskScore("apps/desktop/src/main/ipc/settings.ipc.test.ts");
-    const doc = riskScore("docs/guides/2026-10-24-call-audio.md");
+    const ipc = riskScore("apps/api/src/main/ipc/settings.ipc.ts");
+    const workflow = riskScore(".github/workflows/agent-review.yml");
+    const main = riskScore("apps/api/src/main/session/session-manager.ts");
+    const renderer = riskScore("apps/api/src/renderer/src/features/widget/widget.tsx");
+    const test = riskScore("apps/api/src/main/ipc/settings.ipc.test.ts");
+    const doc = riskScore("docs/guides/2026-01-01-export-format.md");
     expect(ipc).toBeGreaterThan(main);
     expect(workflow).toBe(ipc);
     expect(main).toBeGreaterThan(renderer);
@@ -160,7 +176,7 @@ describe("riskScore", () => {
   test("ranks scripts, shell, infrastructure and database code above ordinary code", () => {
     const ordinary = riskScore("src/features/widget.ts");
     for (const path of [
-      "scripts/claude-review.ts",
+      "scripts/agent-review.ts",
       "tools/deploy.sh",
       "infra/stack.ts",
       "services/api/db/client.ts",
@@ -168,7 +184,7 @@ describe("riskScore", () => {
       expect(riskScore(path)).toBeGreaterThan(ordinary);
     }
     // A test under scripts/ is still a test, whatever its path.
-    expect(riskScore("scripts/claude-review.test.ts")).toBe(riskScore("src/a.test.ts"));
+    expect(riskScore("scripts/agent-review.test.ts")).toBe(riskScore("src/a.test.ts"));
   });
 });
 
@@ -366,8 +382,13 @@ describe("commentableLines", () => {
 });
 
 describe("marker", () => {
-  test("round-trips the reviewed commit", () => {
+  test("writes the agent-review marker and reads it back", () => {
+    expect(marker("abc123")).toBe("<!-- agent-review sha=abc123 -->");
     expect(readMarker(`text\n${marker("abc123")}\n`)).toBe("abc123");
+  });
+
+  test("still reads the marker written before the rename", () => {
+    expect(readMarker("Review.\n\n<!-- claude-review sha=def456 -->")).toBe("def456");
   });
 
   test("finds nothing in a body without one", () => {
@@ -376,14 +397,21 @@ describe("marker", () => {
 });
 
 describe("coverageGaps", () => {
-  test("names the files Claude did not report as reviewed or skipped", () => {
+  test("names the files the agent did not report as reviewed or skipped", () => {
     expect(coverageGaps(["a.ts", "b.ts", "c.ts"], ["a.ts"], ["b.ts"])).toEqual(["c.ts"]);
   });
 });
 
 describe("buildReview", () => {
   const files = [file("src/a.ts", 2, 0, "@@ -1,1 +1,2 @@\n x\n+y")];
-  const base = { files, headSha: "head1234567", since: null, scoped: false, costUsd: 0.07 };
+  const base = {
+    files,
+    headSha: "head1234567",
+    since: null,
+    scoped: false,
+    costUsd: 0.07,
+    modelLabel: "Test Model 1 via Test CLI 0.1",
+  };
 
   test("puts every finding on a diff line inline, labelled by severity", () => {
     const review = buildReview({
@@ -461,9 +489,9 @@ describe("buildReview", () => {
     const complete = output({ files_reviewed: ["src/a.ts"] });
     expect(buildReview({ ...base, output: complete }).body).toContain(marker("head1234567"));
     expect(buildReview({ ...base, scoped: true, output: complete }).body).not.toContain(
-      "claude-review sha=",
+      "agent-review sha=",
     );
-    expect(buildReview({ ...base, output: output() }).body).not.toContain("claude-review sha=");
+    expect(buildReview({ ...base, output: output() }).body).not.toContain("agent-review sha=");
   });
 
   test("shows coverage by batch when the review ran in batches", () => {
@@ -493,7 +521,7 @@ describe("buildReview", () => {
     });
     expect(review.body).toContain("<summary>Coverage by batch</summary>");
     expect(review.body).toContain("| Batch 1 of 2 | 1 | 2 | 8 | reviewed | 9 | $0.30 |");
-    expect(review.body).toContain("2 batches · $0.07");
+    expect(review.body).toContain("<sub>Test Model 1 via Test CLI 0.1 · 2 batches · $0.07</sub>");
   });
 
   test("says what an incremental review covers", () => {
@@ -517,22 +545,6 @@ describe("moveCommentsToBody", () => {
     expect(moved.comments).toEqual([]);
     expect(moved.body).toContain("`a.ts:3`");
     expect(moved.body).toContain("Should fix (correctness): X");
-  });
-});
-
-describe("leaksKey", () => {
-  const key = "sk-ant-api03-SyntheticSyntheticSynthetic0123";
-
-  test("catches the job's own key anywhere in the output", () => {
-    expect(leaksKey(["fine", `oops ${key}`], key)).toBe(true);
-  });
-
-  test("catches any string shaped like an Anthropic key", () => {
-    expect(leaksKey(["sk-ant-admin01-AnotherSyntheticValue_0123456789"], key)).toBe(true);
-  });
-
-  test("lets a review that only quotes the prefix through", () => {
-    expect(leaksKey(["the guard matches `sk-ant-` literally"], key)).toBe(false);
   });
 });
 
@@ -600,40 +612,6 @@ describe("openBotThreads", () => {
   });
 });
 
-describe("buildClaudeArgs", () => {
-  const args = buildClaudeArgs({
-    dir: "/d",
-    budgetUsd: 0.6,
-    model: "m",
-    settings: "/s/engine-settings.json",
-    schema: { type: "object" },
-  });
-  const after = (flag: string) => args[args.indexOf(flag) + 1];
-
-  test("hardens the invocation and keeps the read-only tool rules", () => {
-    expect(args).toContain("--restricted");
-    expect(args).toContain("--strict-mcp-config");
-    expect(after("--tools")).toBe("Read,Glob,Grep");
-    expect(after("--settings")).toBe("/s/engine-settings.json");
-    expect(after("--allowedTools")).toBe("Read,Glob,Grep");
-    expect(after("--disallowedTools")).toContain("Bash");
-    expect(after("--disallowedTools")).toContain("Read(//proc/**)");
-    expect(after("--max-budget-usd")).toBe("0.6");
-  });
-
-  test("leaves the prompt to stdin: no prompt argument follows -p", () => {
-    expect(args[0]).toBe("-p");
-    expect(args[1]).toBe("--model");
-  });
-});
-
-describe("findEngineSettings", () => {
-  test("finds the settings shipped with the kit and refuses to run without them", () => {
-    expect(findEngineSettings(import.meta.dir)).toEndWith("engine-settings.json");
-    expect(() => findEngineSettings("/nonexistent/dir")).toThrow("engine-settings.json");
-  });
-});
-
 describe("buildBatchPrompt", () => {
   const ctx: ReviewContext = {
     pr: 7,
@@ -679,11 +657,11 @@ describe("attempt", () => {
 
   test("turns a call that threw into a failure counted at its cap", () => {
     const failed = attempt(() => {
-      throw new Error("claude did not run (status 1)");
+      throw new Error("the agent did not run (status 1)");
     }, 0.75);
     expect(failed).toEqual({
       ok: false,
-      error: "Error: claude did not run (status 1)",
+      error: "Error: the agent did not run (status 1)",
       costUsd: 0.75,
     });
   });
@@ -719,11 +697,12 @@ describe("buildReview body size", () => {
       since: null,
       scoped: false,
       costUsd: 3,
+      modelLabel: "m",
     });
     expect(review.body.length).toBeLessThanOrEqual(MAX_BODY_CHARS);
     expect(review.body).toContain("Partial review");
     expect(review.body).toMatch(/… and \d+ more \(see the Coverage by batch table\)/);
-    expect(review.body).not.toContain("claude-review sha=");
+    expect(review.body).not.toContain("agent-review sha=");
   });
 
   test("leaves a short list untouched", () => {
@@ -734,6 +713,7 @@ describe("buildReview body size", () => {
       since: null,
       scoped: false,
       costUsd: 0,
+      modelLabel: "m",
     });
     expect(review.body).toContain("Not reviewed: `a.ts`.");
   });

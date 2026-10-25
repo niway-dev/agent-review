@@ -1,8 +1,8 @@
 # ADR 0001: Distribution and trust
 
-- **Status:** accepted as the direction. **Implementation pending:** the reusable workflow, the
-  tags and the command-line contract are not built yet. This repository currently contains the
-  engine and the copy-the-files template only.
+- **Status:** accepted as the direction. **Implementation pending:** the reusable workflow and the
+  tags are not built yet. The command-line contract and the provider adapter boundary are in
+  place (`docs/cli.md`); the copy-the-files template is the only install today.
 - **Date:** 2026-10-25
 
 ## Context

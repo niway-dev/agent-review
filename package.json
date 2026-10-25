@@ -9,6 +9,9 @@
     "type": "git",
     "url": "git+https://github.com/niway-dev/agent-review.git"
   },
+  "bin": {
+    "agent-review": "src/cli.ts"
+  },
   "engines": {
     "bun": ">=1.3"
   },

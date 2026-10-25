@@ -259,6 +259,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.issue.number }}
           REQUEST: ${{ github.event.comment.body }}
+          AGENT_REVIEW_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
           AGENT_REVIEW_BUDGET_USD: ${{ inputs.budget_usd }}
           AGENT_REVIEW_BATCH_BUDGET_USD: ${{ inputs.batch_budget_usd }}
           AGENT_REVIEW_ANSWER_BUDGET_USD: ${{ inputs.answer_budget_usd }}

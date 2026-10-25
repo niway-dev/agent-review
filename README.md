@@ -10,26 +10,42 @@ computed from their paths, riskiest first, and each batch is one agent call with
 money bounds the run rather than pull request size. If some files are not reviewed, the first
 line of the review says so.
 
-Today the agent is [Claude Code](https://claude.com/claude-code) (`claude -p`). The key stays in
+Today the only agent is [Claude Code](https://claude.com/claude-code) (`claude -p`), behind a
+small provider interface. The key stays in
 your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Pre-release; the reusable workflow is written but untested live.** Nothing is tagged yet, and names
-(environment variables, the review marker, the `@claude` mention) may still change before the
-first release. The command-line contract (`src/cli.ts`) is the next piece of work, so there is no
-`bin` entry in `package.json` yet.
+**Pre-release until `v1.0.0`.** The command-line contract is done: one
+CLI (`src/cli.ts`, with a `bin` entry) and a provider adapter boundary, documented in
+[docs/cli.md](docs/cli.md) and [docs/providers/claude-code.md](docs/providers/claude-code.md).
+The reusable workflow is written against that contract but untested live. Nothing is tagged yet, so
+the CLI contract may still change before the first release; the old `CLAUDE_REVIEW_*` variables,
+the `<!-- claude-review sha=… -->` marker, `.github/claude-review.md` and the `@claude` mention
+keep working, with a notice, so older installed copies can migrate gradually.
 
 ## Install
 
 There will be three ways. Only the second works today.
 
-1. **Reusable workflow (recommended; coming).** A short caller workflow in your repository calls
-   a reusable workflow here. You choose the triggers, the secret and the permission ceiling;
-   fixes arrive through a version tag.
-2. **Copy the files (documented today).** Copy the engine, its settings file and the workflow
-   template into your repository. See [docs/setup-copy.md](docs/setup-copy.md).
-3. **npm (later).** Deferred until the command-line contract is stable.
+1. **Reusable workflow (recommended; in progress).** A short caller workflow in your repository
+   calls a reusable workflow here. You choose the triggers, the secret and the permission
+   ceiling; fixes arrive through a version tag.
+2. **Copy the files (documented today).** Copy the `src/` folder and the workflow template into
+   your repository and run `bun scripts/agent-review/cli.ts`. See
+   [docs/setup-copy.md](docs/setup-copy.md).
+3. **npm (later).** `package.json` already has a `bin` entry, so publishing is a step and not a
+   restructure, but it is deferred until the contract is stable.
+
+## Usage
+
+```sh
+bun src/cli.ts review <pr> [paths…]    # review a pull request
+bun src/cli.ts comment <pr>            # handle the operator's comment in $REQUEST
+```
+
+Settings, environment and exit codes: [docs/cli.md](docs/cli.md). The agent behind it, and what
+its hardening covers: [docs/providers/claude-code.md](docs/providers/claude-code.md).
 
 ## Install with the reusable workflow
 
