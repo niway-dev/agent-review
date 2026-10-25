@@ -1,0 +1,108 @@
+# Command-line contract
+
+`agent-review` is one command with two subcommands. The reusable workflow and the copied caller
+workflow both run exactly this; anything else that wants to drive a review can too.
+
+```sh
+bun src/cli.ts review <pr> [paths…]
+bun src/cli.ts comment <pr>          # the comment text comes from $REQUEST
+bun src/cli.ts --help
+bun src/cli.ts --version
+```
+
+`package.json` declares `"bin": {"agent-review": "src/cli.ts"}` and the file starts with
+`#!/usr/bin/env bun`, so an installed copy can be run as `agent-review …`. Bun is required (the
+engine uses `Bun.Glob`).
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `review <pr> [paths…]` | Reviews the pull request. After the first review, only what changed since the last reviewed commit. With paths, only those paths (words that name no changed file are ignored). Posts one GitHub review with inline comments, and replies in its own open threads. |
+| `comment <pr>` | Reads the comment from `REQUEST`. If it mentions the tool (`AGENT_REVIEW_MENTION`, default `@agent-review`, or the alias `@claude`): `review [paths…]` runs a review, anything else is a question answered as a pull request comment. A comment without a mention does nothing. |
+
+## What it posts
+
+- `review`: one review (event `COMMENT`, never an approval or a change request) whose first line
+  says whether coverage is complete or partial, with a "Coverage by batch" table and a footer
+  `<sub>{model label} · {n} batches · ${cost}</sub>`. The footer names the provider and model, for
+  example "Claude Sonnet 5.5 via Claude Code 2.1.304". A complete, unscoped review ends with
+  `<!-- agent-review sha=<head> -->`; the next review starts from that commit. The older
+  `<!-- claude-review sha=… -->` marker is still read, never written.
+- `review` when nothing changed: a short review body saying so ("Already reviewed", "Nothing to
+  review").
+- `comment` with a question: one pull request comment holding the answer and the same footer.
+- With `AGENT_REVIEW_DRY_RUN=1` it reads GitHub but prints instead of posting. It still calls the
+  agent, so it costs money.
+
+## Environment
+
+Required:
+
+| Variable | Meaning |
+| --- | --- |
+| `GH_TOKEN` | Token for `gh`. It is never given to the agent. |
+| `GITHUB_REPOSITORY` | `owner/name` of the repository. |
+| `REQUEST` | `comment` only: the comment text. Pass it through the environment, never interpolated into a shell command. |
+| Provider credentials | For `claude-code`: `ANTHROPIC_API_KEY` (not needed with `AGENT_REVIEW_DRY_RUN=1`, which uses the machine's own login). |
+
+The `gh` CLI and the provider's binary (`claude` for `claude-code`) must be on the `PATH`.
+
+Settings, all optional:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENT_REVIEW_BUDGET_USD` | `3` | Total for all batches (and retries) of one review |
+| `AGENT_REVIEW_BATCH_BUDGET_USD` | `0.75` | Cap for one batch call, further limited by what is left of the total |
+| `AGENT_REVIEW_ANSWER_BUDGET_USD` | `1` | Cap for one question answered by `comment` |
+| `AGENT_REVIEW_BATCH_LINES` | `1000` | Changed lines per batch |
+| `AGENT_REVIEW_BATCH_CHARS` | `140000` | Characters of diff per batch (about 40k tokens at 3.5 characters a token) |
+| `AGENT_REVIEW_DRY_RUN` | unset | `1`: read GitHub, print the review instead of posting |
+| `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` | The reviewer model, passed to the provider |
+| `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent. `claude-code` is the only accepted value; any other is a usage error that lists the accepted ones |
+| `AGENT_REVIEW_MENTION` | `@agent-review` | The keyword `comment` looks for. `@claude` always works as an alias |
+| `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
+| `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files |
+| `AGENT_REVIEW_COMMENT_AUTHOR` | unset | `comment` only: the comment author's login. With `AGENT_REVIEW_OPERATOR` set, a different author makes `comment` do nothing and exit 0 |
+
+Budgets and sizes must be positive numbers; batch lines and chars, positive integers. Anything
+else is a usage error.
+
+### Deprecated names
+
+Each `AGENT_REVIEW_X` falls back to the old `CLAUDE_REVIEW_X` when the new one is unset or empty,
+with one line on stderr per variable (`CLAUDE_REVIEW_X is deprecated; use AGENT_REVIEW_X.`).
+Installed copies can migrate one variable at a time. The new name wins when both are set.
+
+### Repository files
+
+| File | Meaning |
+| --- | --- |
+| `.github/agent-review.md` | Optional. The repository's review focus, read from the checked-out head and appended to the rules. |
+| `.github/claude-review.md` | The old name. Read when the new file is absent, with a notice on stderr. |
+
+A YAML configuration file is not implemented.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | A review or answer was posted, or there was nothing to do (no mention, not the operator, nothing to review, already reviewed). `--help` and `--version` also exit 0. |
+| `1` | Engine error; nothing was posted. Includes a missing provider binary or credential (checked before any call is paid for), a failed `gh` call, and no batch returning a review. |
+| `2` | Usage error: unknown command, missing or invalid pull request number, missing `GH_TOKEN`, `GITHUB_REPOSITORY` or `REQUEST`, an invalid setting, or an unknown provider. |
+
+A batch that fails or overruns does not end the review: the batches that ran are posted and the
+rest are listed as not reviewed.
+
+## Providers
+
+The engine (`src/engine.ts`) is provider-neutral. It asks a `ProviderAdapter`
+(`src/providers/types.ts`) to run one call and gets back structured output, text, cost, turns,
+duration and a terminal reason. Filtering, risk, batches, retries, coverage, budgets, posting and
+threads stay in the engine.
+
+Only the Claude Code adapter exists: [docs/providers/claude-code.md](providers/claude-code.md).
+A second adapter is added only when a consumer needs it or a measured comparison is wanted, and it
+must bring its own sandbox story (what the agent may read or run), its own structured-output path
+and its own cost accounting. There is no plugin system and no second provider planned. The
+interface is drawn from one example, so expect to redraw it when a second adapter does not fit.

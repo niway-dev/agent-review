@@ -4,7 +4,7 @@
 > planned recommended install, will replace it; until then these steps are the way to run the
 > tool. Paths in the "Files" table are paths in this repository (`src/`, `templates/`).
 
-A Claude Sonnet 5.5 code review on GitHub pull requests, run by `claude -p` in GitHub Actions and
+An advisory code review on GitHub pull requests, run by an agent CLI (today Claude Code, `claude -p`) in GitHub Actions and
 paid from Anthropic Console API credits. Findings arrive as **inline review comments** you can
 answer in their threads. The review is advisory: it never approves, requests changes or blocks a
 merge.
@@ -15,10 +15,10 @@ It is meant for repositories whose pushers you trust, not for untrusted or fork 
 
 | When | What happens | Cost |
 | --- | --- | --- |
-| A pull request opens ready for review, or leaves draft | Full review in batches; afterwards, only what changed since the last reviewed commit | $0.05–0.16 measured for one batch in v1; a large pull request costs several batches, at most `CLAUDE_REVIEW_BUDGET_USD` ($3) in total |
-| The owner comments `@claude review` | Review of what changed since the last reviewed commit; Claude answers the owner's replies in its open threads | ~$0.05 measured |
-| `@claude review <path>…` | Review of those paths only; words that name no changed file are ignored | — |
-| Any other `@claude …` by the owner | The question is answered as a comment | at most `CLAUDE_REVIEW_ANSWER_BUDGET_USD` ($1) |
+| A pull request opens ready for review, or leaves draft | Full review in batches; afterwards, only what changed since the last reviewed commit | $0.05–0.16 measured for one batch in v1; a large pull request costs several batches, at most `AGENT_REVIEW_BUDGET_USD` ($3) in total |
+| The operator comments `@agent-review review` | Review of what changed since the last reviewed commit; the agent answers the operator's replies in its open threads | ~$0.05 measured |
+| `@agent-review review <path>…` | Review of those paths only; words that name no changed file are ignored | — |
+| Any other `@agent-review …` by the operator | The question is answered as a comment | at most `AGENT_REVIEW_ANSWER_BUDGET_USD` ($1) |
 | A batch hits its cap, or the pull request budget is spent | The review posts what ran; batches that did not run are listed as not reviewed and their files make it "partial" | at most $3 (soft cap) |
 
 Skipped: drafts, fork pull requests, Dependabot and `release-please--*` branches. Lockfiles, build
@@ -38,8 +38,8 @@ the Coverage by batch table)".
   a configuration file is planned to replace editing the code.
 - **Modules, then batches.** Files are grouped into modules (`moduleKey`: the first directory, or
   two segments under `apps/` and `packages/`), the riskiest module first, production code before
-  tests before documentation inside it. A batch closes at `CLAUDE_REVIEW_BATCH_LINES` changed
-  lines (1000) or `CLAUDE_REVIEW_BATCH_CHARS` characters of diff (140000, about 40k tokens at 3.5
+  tests before documentation inside it. A batch closes at `AGENT_REVIEW_BATCH_LINES` changed
+  lines (1000) or `AGENT_REVIEW_BATCH_CHARS` characters of diff (140000, about 40k tokens at 3.5
   characters a token); one file above either limit is a batch of its own. Documentation is
   reviewed, with the same instruction as code, in the last batches because it scores lowest.
 - **One call per batch**, in sequence, with the batch's annotated diff inside the prompt, sent on
@@ -50,18 +50,18 @@ the Coverage by batch table)".
   be read.
 - **One retry per batch.** A batch that leaves files unaccounted for is re-run once with only
   those files, inside the remaining budget. This is the coverage re-run.
-- **Budgets.** Each call gets `--max-budget-usd = min(CLAUDE_REVIEW_BATCH_BUDGET_USD, remaining
-  total)`; the total is `CLAUDE_REVIEW_BUDGET_USD`. Below $0.05 left, no batch starts and the
+- **Budgets.** Each call gets `--max-budget-usd = min(AGENT_REVIEW_BATCH_BUDGET_USD, remaining
+  total)`; the total is `AGENT_REVIEW_BUDGET_USD`. Below $0.05 left, no batch starts and the
   rest is listed as not reached. A call that dies without a result is counted at its cap and does
   not end the review. The CLI cap is a client-side soft limit and can overshoot.
 - **Review body.** The first line says whether the review is complete or partial. A collapsed
   "Coverage by batch" table lists each batch with its files, lines, highest risk, status
   (`reviewed`, `reviewed after a retry`, `ran out of its budget`, `not run: budget spent`, …),
   turns and cost; the footer shows the model, the number of batches and the total cost. The
-  `<!-- claude-review sha=… -->` marker is written only when every kept file is accounted for.
-- **Dry run.** `CLAUDE_REVIEW_DRY_RUN=1 GH_TOKEN=… GITHUB_REPOSITORY=… bun scripts/claude-review.ts
+  `<!-- agent-review sha=… -->` marker (the old `<!-- claude-review sha=… -->` is still read) is written only when every kept file is accounted for.
+- **Dry run.** `AGENT_REVIEW_DRY_RUN=1 GH_TOKEN=… GITHUB_REPOSITORY=… bun scripts/agent-review/cli.ts
   review <pr>` reads GitHub but prints the review and replies instead of posting them. It still
-  calls `claude`, with whatever login the machine has, so it costs money; it does not print the
+  calls the agent, with whatever login the machine has, so it costs money; it does not print the
   batches and prompts without calling Claude.
 
 Stdin prompts predate Claude Code 2.1.304 (the pin, kept). Checked at $0 on 2.1.308: a stdin prompt
@@ -78,13 +78,15 @@ prompts without calling Claude.
 
 | Copy to | From |
 | --- | --- |
-| `scripts/claude-review.ts` | `src/claude-review.ts` |
-| `scripts/engine-settings.json` | `src/engine-settings.json`: the engine's own Claude settings; the script looks for it next to itself and refuses to run without it |
-| `scripts/claude-review.test.ts` | `src/claude-review.test.ts`: pure functions only, no network (run it with `bun test` in this repository; change the import path if you copy it elsewhere) |
-| `.github/workflows/claude-review.yml` | `templates/caller-workflow.yml`: edit its trust paragraph (`EDIT THIS`) |
-| `.github/claude-review.md` | Write it: the repository's review focus, as a short list. Optional |
+| `scripts/agent-review/` | The whole `src/` folder of this repository: `cli.ts`, `engine.ts`, `config.ts` and `providers/` (including `providers/claude-code.settings.json`, which the adapter looks for next to itself and refuses to run without). Leave out the `*.test.ts` files, or keep them and run them with `bun test ./scripts/agent-review` |
+| `.github/workflows/agent-review.yml` | `templates/caller-workflow.yml`: edit its trust paragraph, the operator login (twice) and the other `EDIT THIS` markers |
+| `.github/agent-review.md` | Write it: the repository's review focus, as a short list. Optional |
 
-The script needs Bun (the workflow pins 1.3.4) and nothing else from the repository.
+The CLI contract (commands, environment, exit codes) is in [cli.md](cli.md); the Claude Code
+hardening is in [providers/claude-code.md](providers/claude-code.md). The copy is a one-time
+snapshot: to update it, copy `src/` again.
+
+The CLI needs Bun (the workflow pins 1.3.4) and nothing else from the repository.
 
 ## Setup, in order
 
@@ -97,69 +99,68 @@ The script needs Bun (the workflow pins 1.3.4) and nothing else from the reposit
    ```
    In the web UI: Settings → Secrets and variables → Actions → **Repository secrets** → New
    repository secret.
-3. **Copy the files** above. Make the tests run where the repository runs script tests
-   (`bun test ./scripts/`).
-4. **Write `.github/claude-review.md`**: the rules a reviewer of this repository must know, taken
+3. **Copy the files** above. Run `bun scripts/agent-review/cli.ts --help` once to check the copy.
+4. **Write `.github/agent-review.md`**: the rules a reviewer of this repository must know, taken
    from its `CLAUDE.md`, not invented.
 5. **Open the pull request that adds the kit, ready for review.** A `pull_request` workflow runs
-   from the pull request's own branch, so it reviews itself. The `@claude` job runs from the
+   from the pull request's own branch, so it reviews itself. The `@agent-review` job runs from the
    default branch, so it can only be tried after the merge. **First-install limitation** (seen in a
    real setup): GitHub runs `issue_comment` workflows from the default
    branch's copy of the file, so the pull request that installs the kit only gets the automatic
-   review on open/ready. `@claude review` and thread replies work from the next pull request, once
+   review on open/ready. `@agent-review review` and thread replies work from the next pull request, once
    the workflow is on the default branch.
 
 ## Things that will surprise you
 
 - **`anthropics/claude-code-action@v1` failed with `billing_error`** while `claude -p` with the
-  same key, version and runner worked. The kit calls `claude -p` directly. If you try the action,
+  same key, version and runner worked. The tool calls `claude -p` directly. If you try the action,
   its errors are hidden unless `show_full_output: true`, which prints every tool result.
 - **A pull request opened before the workflow reached the default branch gets no review.** Comment
-  `@claude review` on it.
+  `@agent-review review` on it.
 - **Re-running a review on purpose**: toggle the pull request to draft and back
-  (`gh pr ready <n> --undo && gh pr ready <n>`), or comment `@claude review`. Each toggle shows up
+  (`gh pr ready <n> --undo && gh pr ready <n>`), or comment `@agent-review review`. Each toggle shows up
   as a `ready_for_review` run in the Actions list.
-- **Every comment on a pull request starts a workflow run**, skipped unless it is the owner's
-  `@claude`. Concurrency is per job for that reason: a workflow-level group lets a skipped run
+- **Every comment on a pull request starts a workflow run**, skipped unless it is the operator's
+  `@agent-review` (or the `@claude` alias). Concurrency is per job for that reason: a workflow-level group lets a skipped run
   cancel a review.
 - **`gh --jq` prints string results raw**, like `jq -r`. The script relies on it.
-- **Line numbers**: Claude reads a diff whose lines carry their number in the file at the head.
+- **Line numbers**: the agent reads a diff whose lines carry their number in the file at the head.
   Without that it cited positions in the diff file, and the comment could not be anchored.
 - **A key guard that matches the literal `sk-ant-` prefix fires on a review that quotes it.** The
-  script matches the job's exact key or the full key shape.
+  CLI matches the job's exact key or the full key shape.
 
 ## Security model
 
-Claude runs with `--restricted --strict-mcp-config --tools Read,Glob,Grep` and the engine's
-`--settings` file: no shell, no MCP servers, the head's user, project and local settings (its
+Claude Code (the only adapter) runs with `--restricted --strict-mcp-config --tools Read,Glob,Grep`
+and the adapter's `--settings` file: no shell, no MCP servers, the head's user, project and local settings (its
 `.claude/` hooks included) ignored, no GitHub token in its environment, `/proc` denied to every
 read tool (unverified under `--restricted`), and `--max-budget-usd` per call. Whether the head's
-`CLAUDE.md` still loads as memory under `--restricted` is unverified. The script holds the tokens, posts the
+`CLAUDE.md` still loads as memory under `--restricted` is unverified. The CLI holds the tokens, posts the
 review, and refuses to post text containing the key. On a public repository, only replies by
-`OWNER`, `MEMBER` or `COLLABORATOR` reach Claude, and only the owner's `@claude` starts a run.
+`OWNER`, `MEMBER` or `COLLABORATOR` reach the agent, and only the operator's `@agent-review` (or `@claude`) starts a run.
 
 **This is not a sandbox.** Managed settings still apply, and an encoded key would pass the output
-check. The kit is safe only when
+check. The tool is safe only when
 everyone who can push is trusted. Reviewing outside contributors' code needs a different design.
 
 ## Settings
 
-Workflow `env` (the review job reads them from the pull request's branch; the trust assumption
-covers that):
+The full table of `AGENT_REVIEW_*` variables, their defaults and the exit codes is in
+[cli.md](cli.md). In the workflow `env` (the review job reads it from the pull request's branch;
+the trust assumption covers that) the template sets:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CLAUDE_CODE_VERSION` | `2.1.304` | Pinned Claude Code; bump by hand and run a review |
-| `CLAUDE_REVIEW_BATCH_LINES` | `1000` | Changed lines per batch |
-| `CLAUDE_REVIEW_BATCH_CHARS` | `140000` | Characters of diff per batch (about 40k tokens at 3.5 characters a token) |
-| `CLAUDE_REVIEW_BATCH_BUDGET_USD` | `0.75` | `--max-budget-usd` cap per batch call, retries included in the total |
-| `CLAUDE_REVIEW_BUDGET_USD` | `3` | Total for all batches (and retries) of one review |
-| `CLAUDE_REVIEW_ANSWER_BUDGET_USD` | `1` | Cap for one `@claude` question |
-| `CLAUDE_REVIEW_EXCLUDE` | — | Extra globs to drop, comma-separated |
-| `CLAUDE_REVIEW_MODEL` | `claude-sonnet-5-5` | The reviewer model |
-| `CLAUDE_REVIEW_DRY_RUN` | — | `1`: read GitHub, print the review instead of posting (still calls `claude`) |
+| `AGENT_REVIEW_BATCH_LINES` | `1000` | Changed lines per batch |
+| `AGENT_REVIEW_BATCH_BUDGET_USD` | `0.75` | Cap per batch call, retries included in the total |
+| `AGENT_REVIEW_BUDGET_USD` | `3` | Total for all batches (and retries) of one review |
+| `AGENT_REVIEW_ANSWER_BUDGET_USD` | `1` | Cap for one question |
+| `AGENT_REVIEW_OPERATOR` | (edit) | The login allowed to command the tool |
 
-Names and defaults are those the script reads today. An earlier draft used
-`CLAUDE_REVIEW_BUDGET_USD` for the per-batch cap and `CLAUDE_REVIEW_PR_BUDGET_USD` for the total,
-plus `CLAUDE_REVIEW_MAX_FILES` and `CLAUDE_REVIEW_MAX_PROMPT_CHARS`; they no longer exist, and
-`CLAUDE_REVIEW_BUDGET_USD` now means the total.
+## Migrating an older copy
+
+An older copy used `CLAUDE_REVIEW_*` variables, `scripts/claude-review.ts` and `@claude`. The new
+CLI reads each old variable when the new one is unset (with a notice on stderr), reads the old
+`<!-- claude-review sha=… -->` marker and `.github/claude-review.md`, and accepts `@claude` as an
+alias, so a repository can switch to the new files first and rename variables afterwards.
