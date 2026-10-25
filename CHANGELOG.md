@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-Initial import of the review engine from a private kit. Nothing is tagged yet.
+## 1.0.0-rc.1 (2026-10-25)
+
+Initial import of the review engine from a private kit. First release candidate.
 
 - `src/claude-review.ts`: the engine. Reviews a pull request with `claude -p` in batches ordered
   by risk, posts inline review comments, and answers the operator's `@claude` comments.

@@ -1,6 +1,6 @@
 {
   "name": "agent-review",
-  "version": "0.0.0",
+  "version": "1.0.0-rc.1",
   "description": "Advisory pull request reviews by an agent CLI, run in your own GitHub Actions with your own key",
   "private": false,
   "type": "module",
