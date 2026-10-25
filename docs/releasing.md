@@ -4,7 +4,8 @@ For the maintainer. Consumers call `review.yml@v1`, so a tag is a trust decision
 controls it controls code that runs with the consumers' API key. Protect tags `v*` in the
 repository settings.
 
-No tags exist yet; cutting them is not part of the ticket that added this file.
+Current state: the annotated tags `v1.0.0-rc.1` and `v1` exist and point at the same commit. `v1`
+floats; `v1.0.0` has not been cut yet.
 
 ## Rules
 

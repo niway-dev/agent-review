@@ -16,22 +16,23 @@ your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Pre-release until `v1.0.0`.** The command-line contract is done: one
+**Release candidate: `1.0.0-rc.1` is tagged, and `v1` floats to it.** The reusable workflow has
+run live in a private consumer across owners. The command-line contract is done: one
 CLI (`src/cli.ts`, with a `bin` entry) and a provider adapter boundary, documented in
 [docs/cli.md](docs/cli.md) and [docs/providers/claude-code.md](docs/providers/claude-code.md).
-The reusable workflow is written against that contract but untested live. Nothing is tagged yet, so
-the CLI contract may still change before the first release; the old `CLAUDE_REVIEW_*` variables,
+The reusable workflow is written against that contract. Until `v1.0.0` is cut, the CLI contract
+may still change; the old `CLAUDE_REVIEW_*` variables,
 the `<!-- claude-review sha=… -->` marker, `.github/claude-review.md` and the `@claude` mention
 keep working, with a notice, so older installed copies can migrate gradually.
 
 ## Install
 
-There will be three ways. Only the second works today.
+There are three ways. The first two work today; the third is deferred.
 
-1. **Reusable workflow (recommended; in progress).** A short caller workflow in your repository
+1. **Reusable workflow (recommended).** A short caller workflow in your repository
    calls a reusable workflow here. You choose the triggers, the secret and the permission
    ceiling; fixes arrive through a version tag.
-2. **Copy the files (documented today).** Copy the `src/` folder and the workflow template into
+2. **Copy the files .** Copy the `src/` folder and the workflow template into
    your repository and run `bun scripts/agent-review/cli.ts`. See
    [docs/setup-copy.md](docs/setup-copy.md).
 3. **npm (later).** `package.json` already has a `bin` entry, so publishing is a step and not a
@@ -49,7 +50,8 @@ its hardening covers: [docs/providers/claude-code.md](docs/providers/claude-code
 
 ## Install with the reusable workflow
 
-**Pre-release until `v1.0.0`:** no tag exists yet. Pin a commit SHA instead of `v1` until then.
+**Release candidate:** the tags `v1.0.0-rc.1` and `v1` exist. `v1` floats to compatible fixes; to
+freeze, pin a full commit SHA instead.
 
 Add this file as `.github/workflows/agent-review.yml`, save `ANTHROPIC_API_KEY` as a repository
 secret and set your login as `operator`:

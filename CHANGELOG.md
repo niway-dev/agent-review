@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- docs: install and releasing reflect the first tags (`v1.0.0-rc.1` and the floating `v1`).
+
 ## 1.0.0-rc.1 (2026-10-25)
 
 Initial import of the review engine from a private kit. First release candidate.

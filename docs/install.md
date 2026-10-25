@@ -1,7 +1,7 @@
 # Install with the reusable workflow
 
-Pre-release until `v1.0.0`: no tag exists yet, so `@v1` does not resolve today. Until it does,
-pin a full commit SHA of this repository in the caller file.
+Release candidate: the tags `v1.0.0-rc.1` and `v1` exist, and `@v1` resolves. `v1` floats to
+compatible fixes; to freeze, pin a full commit SHA of this repository in the caller file.
 
 Your repository keeps one short caller file. It owns the triggers, the secret it passes and the
 permission ceiling; the reusable workflow in this repository runs the engine.
@@ -69,10 +69,13 @@ The reusable workflow takes these `with:` inputs. Only `operator` is required.
 
 ## Private repositories
 
-- Calling a workflow across owners requires this repository to be public. That is the plan for
-  `v1.0.0`; while it is private, only repositories that are allowed to use it can call it.
+- Calling a workflow across owners requires this repository to be public, and it is. If it were
+  private, only repositories that are allowed to use it could call it.
 - Same organisation, private use: set this repository's Settings, Actions, General, Access to
   "Accessible from repositories in the organisation".
 - The workflow checks the engine out with the job's own token. A token for your repository
   cannot read another private repository, so a private engine repository is not expected to work
-  without extra setup. This is untested; ticket 1.9 verifies the live behaviour.
+  without extra setup.
+- Verified live: a private repository owned by a different user than this repository's
+  organisation called `@v1`, and the engine checkout resolved the tag across owners with the
+  job's own token.
