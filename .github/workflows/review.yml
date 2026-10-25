@@ -1,0 +1,272 @@
+name: Agent review (reusable)
+
+# Reusable workflow: an advisory review of a pull request, paid from the caller's own API key.
+# Call it from a short caller file (templates/agent-review-caller.yml); see docs/install.md.
+# The review is never a required check, an approval, a change request or a merge gate.
+#
+# What the consumer must trust (see SECURITY.md and docs/adr/0001-distribution-and-trust.md):
+#   - Everyone who can push a branch to the calling repository. On `pull_request` GitHub runs
+#     the caller file from the pull request's own merge commit, so a person who can push can
+#     edit the caller and read `ANTHROPIC_API_KEY`. Nothing here defends against that.
+#   - The ref of this workflow that the caller pins. A floating tag such as `v1` is a trust
+#     dependency on this repository's maintainers; pin a full commit SHA for immutability.
+#
+# What this workflow does about it:
+#   - Fork pull requests are excluded (they get no secrets anyway), and the on-demand path
+#     re-checks that the head belongs to the calling repository before it runs anything.
+#   - `pull_request_target` is not used and must not be added to the caller.
+#   - Only the `operator` login can start an on-demand run.
+#   - The reviewed head is data: it is checked out without credentials, and the engine that
+#     holds the key comes from this repository at the version of this workflow, never from the
+#     head. The engine launches Claude Code with `--restricted --strict-mcp-config
+#     --tools Read,Glob,Grep` and its own settings, so the head's `.claude/` settings and hooks
+#     are blocked, no MCP server starts and only read tools exist. That is not a sandbox: it is
+#     claimed only for what tests show.
+#   - Budgets and batch sizes come from the caller's `with:` values, never from the pull request.
+
+on:
+  workflow_call:
+    inputs:
+      operator:
+        description: GitHub login allowed to start on-demand runs by comment
+        type: string
+        required: true
+      mention:
+        description: Mention that starts an on-demand run (`@claude` is always accepted too)
+        type: string
+        default: "@agent-review"
+      budget_usd:
+        description: Most one pull request review may spend, in USD
+        type: number
+        default: 3
+      batch_budget_usd:
+        description: Most one batch may spend, in USD
+        type: number
+        default: 0.75
+      answer_budget_usd:
+        description: Most one on-demand question may spend, in USD
+        type: number
+        default: 1
+      batch_lines:
+        description: Changed lines per batch
+        type: number
+        default: 1000
+      batch_chars:
+        description: Diff characters per batch
+        type: number
+        default: 140000
+      model:
+        description: Model the agent uses
+        type: string
+        default: claude-sonnet-5-5
+      provider:
+        description: Agent provider; only claude-code exists
+        type: string
+        default: claude-code
+      claude_code_version:
+        description: Pinned Claude Code version
+        type: string
+        default: 2.1.304
+      bun_version:
+        description: Pinned Bun version
+        type: string
+        default: 1.3.4
+      skip_branch_prefixes:
+        description: Comma-separated head branch prefixes whose pull requests are not reviewed
+        type: string
+        default: release-please--
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: Anthropic API key that pays for the review
+        required: true
+
+# Concurrency is per job, never per workflow: every comment on a pull request starts a run,
+# and a workflow-level group would let a skipped `on-demand` cancel a review.
+
+jobs:
+  review:
+    name: Agent review
+    # Fork and Dependabot pull requests get no secrets, so the job could only fail there.
+    # The skipped branch prefixes are checked in the first step (a prefix list cannot be
+    # matched in an expression).
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # batches run one after another
+    concurrency:
+      group: agent-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Skip branches that are not reviewed
+        id: gate
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PREFIXES: ${{ inputs.skip_branch_prefixes }}
+        run: |
+          IFS=',' read -ra list <<< "$PREFIXES"
+          for p in "${list[@]}"; do
+            p="${p// /}"
+            if [ -n "$p" ] && [[ "$HEAD_REF" == "$p"* ]]; then
+              echo "Branch $HEAD_REF matches skipped prefix $p; not reviewing."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      # The head, not the default merge commit, so the files match the diff's lines. It is
+      # data: no credentials stay in its .git, and nothing in it is executed.
+      - name: Checkout the pull request head
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # In a reusable workflow, `github.workflow_sha` and `github.workflow_ref` describe the
+      # caller's workflow, not this one. The `job` context describes the workflow file that
+      # defines the job, and the GitHub docs use exactly these two properties to check out a
+      # reusable workflow's own source:
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context
+      # So the engine version always equals the version of this workflow that was called.
+      - name: Checkout the engine at this workflow's version
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .agent-review-engine
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the engine version
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          ENGINE_REPO: ${{ job.workflow_repository }}
+          ENGINE_SHA: ${{ job.workflow_sha }}
+        run: echo "Engine $ENGINE_REPO@$ENGINE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Bun
+        if: steps.gate.outputs.skip != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun_version }}
+
+      - name: Install Claude Code
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Review the pull request
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          AGENT_REVIEW_BUDGET_USD: ${{ inputs.budget_usd }}
+          AGENT_REVIEW_BATCH_BUDGET_USD: ${{ inputs.batch_budget_usd }}
+          AGENT_REVIEW_ANSWER_BUDGET_USD: ${{ inputs.answer_budget_usd }}
+          AGENT_REVIEW_BATCH_LINES: ${{ inputs.batch_lines }}
+          AGENT_REVIEW_BATCH_CHARS: ${{ inputs.batch_chars }}
+          AGENT_REVIEW_MODEL: ${{ inputs.model }}
+          AGENT_REVIEW_PROVIDER: ${{ inputs.provider }}
+          AGENT_REVIEW_MENTION: ${{ inputs.mention }}
+          AGENT_REVIEW_OPERATOR: ${{ inputs.operator }}
+        run: bun .agent-review-engine/src/cli.ts review "$PR"
+
+  on-demand:
+    name: Agent on demand
+    # Only the operator's login starts a run: `author_association` is `OWNER` for a
+    # user-owned repository but `MEMBER` in an organisation, so the login is compared.
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == inputs.operator &&
+      (contains(github.event.comment.body, inputs.mention) ||
+       contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # batches run one after another
+    concurrency:
+      group: agent-review-on-demand-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      # `issue_comment` carries no head repository, so check it before anything reads the
+      # head: on a fork's pull request the job stops instead of running its code with the key.
+      - name: Refuse a fork pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.repo.full_name)
+          if [ "$head" != "$GITHUB_REPOSITORY" ]; then
+            echo "Pull request #$PR comes from $head, not $GITHUB_REPOSITORY; not running." >&2
+            exit 1
+          fi
+
+      # The head is data, as in the `review` job.
+      - name: Checkout the pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 1
+          persist-credentials: false
+
+      # See the `review` job for why this is `job.workflow_sha` and not `github.workflow_sha`.
+      - name: Checkout the engine at this workflow's version
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .agent-review-engine
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the engine version
+        env:
+          ENGINE_REPO: ${{ job.workflow_repository }}
+          ENGINE_SHA: ${{ job.workflow_sha }}
+        run: echo "Engine $ENGINE_REPO@$ENGINE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun_version }}
+
+      - name: Install Claude Code
+        env:
+          CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # The comment reaches the engine through the environment, never interpolated into the
+      # shell, so its text cannot run as a command.
+      - name: Review or answer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          REQUEST: ${{ github.event.comment.body }}
+          AGENT_REVIEW_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          AGENT_REVIEW_BUDGET_USD: ${{ inputs.budget_usd }}
+          AGENT_REVIEW_BATCH_BUDGET_USD: ${{ inputs.batch_budget_usd }}
+          AGENT_REVIEW_ANSWER_BUDGET_USD: ${{ inputs.answer_budget_usd }}
+          AGENT_REVIEW_BATCH_LINES: ${{ inputs.batch_lines }}
+          AGENT_REVIEW_BATCH_CHARS: ${{ inputs.batch_chars }}
+          AGENT_REVIEW_MODEL: ${{ inputs.model }}
+          AGENT_REVIEW_PROVIDER: ${{ inputs.provider }}
+          AGENT_REVIEW_MENTION: ${{ inputs.mention }}
+          AGENT_REVIEW_OPERATOR: ${{ inputs.operator }}
+        run: bun .agent-review-engine/src/cli.ts comment "$PR"

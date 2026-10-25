@@ -37,3 +37,11 @@ Initial import of the review engine from a private kit. Nothing is tagged yet.
 - Tests: an end-to-end run of the batch loop against a fake provider, tests for the adapter, the
   settings, the CLI and both markers and mentions; fixtures use neutral names.
 - `SECURITY.md`: reports are handled best-effort, with no SLA.
+
+### Reusable workflow
+
+- `.github/workflows/review.yml`: the reusable workflow (`workflow_call`). Two jobs, `review` and
+  `on-demand`, that check out the head as data and the engine at the called workflow's commit.
+- `templates/agent-review-caller.yml`: the short caller file consumers add.
+- `docs/install.md`, `docs/releasing.md`: installation and the tag rules.
+- `.github/workflows/ci.yml`: tests and actionlint for this repository.

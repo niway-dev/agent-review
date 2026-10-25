@@ -16,10 +16,10 @@ your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Pre-release; the reusable workflow is in progress.** The command-line contract is done: one
+**Pre-release until `v1.0.0`.** The command-line contract is done: one
 CLI (`src/cli.ts`, with a `bin` entry) and a provider adapter boundary, documented in
 [docs/cli.md](docs/cli.md) and [docs/providers/claude-code.md](docs/providers/claude-code.md).
-The reusable workflow is being written against that contract. Nothing is tagged yet, so
+The reusable workflow is written against that contract but untested live. Nothing is tagged yet, so
 the CLI contract may still change before the first release; the old `CLAUDE_REVIEW_*` variables,
 the `<!-- claude-review sha=… -->` marker, `.github/claude-review.md` and the `@claude` mention
 keep working, with a notice, so older installed copies can migrate gradually.
@@ -46,6 +46,35 @@ bun src/cli.ts comment <pr>            # handle the operator's comment in $REQUE
 
 Settings, environment and exit codes: [docs/cli.md](docs/cli.md). The agent behind it, and what
 its hardening covers: [docs/providers/claude-code.md](docs/providers/claude-code.md).
+
+## Install with the reusable workflow
+
+**Pre-release until `v1.0.0`:** no tag exists yet. Pin a commit SHA instead of `v1` until then.
+
+Add this file as `.github/workflows/agent-review.yml`, save `ANTHROPIC_API_KEY` as a repository
+secret and set your login as `operator`:
+
+```yaml
+name: Agent review
+# Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
+# `v1` floats to compatible fixes; to freeze, replace it with a full commit SHA of this repository.
+# First install: the installing pull request gets only the automatic review. `@agent-review review`
+# and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
+on:
+  pull_request: { types: [opened, ready_for_review] }
+  issue_comment: { types: [created] }
+permissions: { contents: read, pull-requests: write, issues: read }
+jobs:
+  review:
+    uses: niway-dev/agent-review/.github/workflows/review.yml@v1
+    with:
+      operator: EDIT-THIS-github-login
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Full steps, settings and updates: [docs/install.md](docs/install.md). Maintainers:
+[docs/releasing.md](docs/releasing.md).
 
 ## Security model
 
