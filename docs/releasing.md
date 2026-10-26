@@ -8,7 +8,8 @@ including a release, lands through one. Tags `v*` cannot be moved or deleted exc
 repository admin bypass; that bypass is how the release process moves `v1` (see below). Creating
 a new exact tag is not blocked.
 
-No tags exist yet; cutting them is not part of the ticket that added this file.
+Current state: the annotated tags `v1.0.0-rc.1` and `v1` exist and point at the same commit. `v1`
+floats; `v1.0.0` has not been cut yet.
 
 ## Rules
 
