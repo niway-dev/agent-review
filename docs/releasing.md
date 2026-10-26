@@ -42,7 +42,7 @@ exact tag `v1.x.y` and the SHA never move. If the secret is missing, or the push
 does not fail the run: it prints a warning and the two commands above in the run summary. Run
 them as a repository admin. This is also the only manual tag instruction left.
 
-## Secrets (repository secrets, created by the owner)
+## Secrets (in the `production` environment, created by the owner)
 
 | Secret | Used for | Without it |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ admin (who is a bypass actor of the `v*` tag ruleset), with:
 - A short expiry; put the renewal date in your calendar. An expired token shows up as the alias
   warning, not as a failed release.
 
-Settings, Secrets and variables, Actions, "New repository secret".
+Settings, Environments, `production` (create it if missing), "Add environment secret". The release job declares `environment: production`; repository-level secrets are still readable, but an environment secret with the same name takes precedence. Do not add required reviewers or a wait timer to this environment: the job runs on every push to `main` and would block on them. The same personal access token can back both secrets, and the one already used by the maintainer's other repositories works here once its repository access includes this repository.
 
 ## Rules
 
