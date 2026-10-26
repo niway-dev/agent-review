@@ -1,13 +1,5 @@
 # Changelog
 
-## [1.0.0](https://github.com/niway-dev/agent-review/compare/v1.0.0...v1.0.0) (2026-10-26)
-
-
-### Features
-
-* label findings on two axes, severity and topic ([2b91c90](https://github.com/niway-dev/agent-review/commit/2b91c9070ca95f0b8e30a776e45c8e9300e56fcc))
-* label findings on two axes, severity and topic ([43efd27](https://github.com/niway-dev/agent-review/commit/43efd270a801ffc6542d90dc02934ef3691a80bf))
-
 ## [1.0.0](https://github.com/niway-dev/agent-review/compare/v1.0.0-rc.1...v1.0.0) (2026-10-26)
 
 
