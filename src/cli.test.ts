@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { extractRepoDir } from "./cli";
 
 const cli = join(import.meta.dir, "cli.ts");
 const run = (args: string[], env: Record<string, string> = {}) => {
@@ -46,5 +49,20 @@ describe("cli", () => {
     });
     expect(out.code).toBe(1);
     expect(out.stderr).toContain("did not run");
+  });
+});
+
+describe("--repo-dir", () => {
+  test("is taken out of the arguments, in both spellings, and defaults to the current directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-dir-"));
+    expect(extractRepoDir(["review", "7", "--repo-dir", dir])).toEqual({ repoDir: dir, rest: ["review", "7"] });
+    expect(extractRepoDir(["--repo-dir=" + dir, "comment", "7"])).toEqual({ repoDir: dir, rest: ["comment", "7"] });
+    expect(extractRepoDir(["review", "7"]).repoDir).toBe(process.cwd());
+  });
+
+  test("a missing value or a directory that does not exist is a usage error", () => {
+    expect(() => extractRepoDir(["review", "7", "--repo-dir"])).toThrow("needs a directory");
+    expect(() => extractRepoDir(["review", "7", "--repo-dir=/nonexistent/head"])).toThrow("not a directory");
+    expect(run(["review", "7", "--repo-dir", "/nonexistent/head"]).code).toBe(2);
   });
 });

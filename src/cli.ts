@@ -10,16 +10,20 @@
  * Exit codes: 0 posted or nothing to do; 1 engine error (nothing posted); 2 usage error.
  * The settings are documented in docs/cli.md.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { loadConfig, UsageError } from "./config";
 import { comment, defaultGh, review, type Deps } from "./engine";
 import { getProvider, PROVIDER_NAMES, UnknownProviderError } from "./providers";
 
 export const USAGE = `Usage:
-  agent-review review <pr> [paths…]   Review a pull request (or only the given paths)
-  agent-review comment <pr>           Handle the comment in $REQUEST (a review or an answer)
+  agent-review review <pr> [paths…] [--repo-dir <dir>]   Review a pull request (or only the given paths)
+  agent-review comment <pr> [--repo-dir <dir>]           Handle the comment in $REQUEST (a review or an answer)
   agent-review --help | --version
+
+Options:
+  --repo-dir <dir>                   The checked-out pull request head: every file the engine reads
+                                     and the agent's working directory. Default: the current directory.
 
 Environment:
   GH_TOKEN, GITHUB_REPOSITORY        required
@@ -41,6 +45,32 @@ export function readVersion(dir = import.meta.dir) {
   }
 }
 
+/**
+ * Takes `--repo-dir <dir>` or `--repo-dir=<dir>` out of the arguments. The directory is the
+ * reviewed head, which the engine reads as data; it is not the engine's own working directory.
+ */
+export function extractRepoDir(argv: string[]) {
+  const rest: string[] = [];
+  let value: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--repo-dir") {
+      value = argv[++i];
+      if (value === undefined || value === "") throw new UsageError("--repo-dir needs a directory.");
+    } else if (arg.startsWith("--repo-dir=")) {
+      value = arg.slice("--repo-dir=".length);
+      if (value === "") throw new UsageError("--repo-dir needs a directory.");
+    } else {
+      rest.push(arg);
+    }
+  }
+  const repoDir = resolve(value ?? ".");
+  if (!existsSync(repoDir) || !statSync(repoDir).isDirectory()) {
+    throw new UsageError(`--repo-dir ${repoDir} is not a directory.`);
+  }
+  return { repoDir, rest };
+}
+
 function required(env: Record<string, string | undefined>, name: string) {
   const value = env[name];
   if (value === undefined || value === "") throw new UsageError(`${name} is not set`);
@@ -48,7 +78,7 @@ function required(env: Record<string, string | undefined>, name: string) {
 }
 
 export function main(argv: string[], env: Record<string, string | undefined>): number {
-  const [mode, prArg, ...rest] = argv;
+  const mode = argv[0];
   if (mode === "--help" || mode === "-h") {
     console.log(USAGE);
     return 0;
@@ -58,6 +88,8 @@ export function main(argv: string[], env: Record<string, string | undefined>): n
     return 0;
   }
   try {
+    const { repoDir, rest: args } = extractRepoDir(argv);
+    const [, prArg, ...rest] = args;
     if (mode !== "review" && mode !== "comment") {
       throw new UsageError(mode ? `Unknown command "${mode}".` : "No command given.");
     }
@@ -75,6 +107,7 @@ export function main(argv: string[], env: Record<string, string | undefined>): n
       gh: defaultGh,
       provider,
       config,
+      repoDir,
       log: (line) => console.log(line),
       warn: (line) => console.error(line),
     };

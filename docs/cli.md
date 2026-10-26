@@ -4,8 +4,8 @@
 workflow both run exactly this; anything else that wants to drive a review can too.
 
 ```sh
-bun src/cli.ts review <pr> [paths…]
-bun src/cli.ts comment <pr>          # the comment text comes from $REQUEST
+bun src/cli.ts review <pr> [paths…] [--repo-dir <dir>]
+bun src/cli.ts comment <pr> [--repo-dir <dir>]   # the comment text comes from $REQUEST
 bun src/cli.ts --help
 bun src/cli.ts --version
 ```
@@ -14,12 +14,25 @@ bun src/cli.ts --version
 `#!/usr/bin/env bun`, so an installed copy can be run as `agent-review …`. Bun is required (the
 engine uses `Bun.Glob`).
 
+## Options
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `--repo-dir <dir>` (or `--repo-dir=<dir>`) | `.` | The checked-out pull request head. The engine reads the focus file from it and starts the agent with it as working directory; it reads nothing else from the current directory. A directory that does not exist is a usage error. |
+
+The reusable workflow runs the engine from its own checkout (`engine/`) and passes the head
+(`head/`) here, so the process's working directory is never the reviewed code. Run it the same way:
+`bun --no-env-file --config=<engine>/bunfig.toml <engine>/src/cli.ts review 7 --repo-dir <head>`.
+Bun reads `bunfig.toml` (including `preload`, which runs code) and `.env` from the working
+directory; `--no-env-file` and `--config=` keep both of those out. Write `--config=<path>` with the
+equals sign: `-c <path>` did not replace the working directory's config in Bun 1.3.4.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `review <pr> [paths…]` | Reviews the pull request. After the first review, only what changed since the last reviewed commit. With paths, only those paths (words that name no changed file are ignored). Posts one GitHub review with inline comments, and replies in its own open threads. |
-| `comment <pr>` | Reads the comment from `REQUEST`. If it mentions the tool (`AGENT_REVIEW_MENTION`, default `@agent-review`, or the alias `@claude`): `review [paths…]` runs a review, anything else is a question answered as a pull request comment. A comment without a mention does nothing. |
+| `comment <pr>` | Fails with exit 1 when `AGENT_REVIEW_OPERATOR` is empty or a template placeholder (`EDIT…`, `your-github-login`). Reads the comment from `REQUEST`. If it mentions the tool (`AGENT_REVIEW_MENTION`, default `@agent-review`, or the alias `@claude`): `review [paths…]` runs a review, anything else is a question answered as a pull request comment. A comment without a mention does nothing. |
 
 ## What it posts
 
@@ -61,9 +74,9 @@ Settings, all optional:
 | `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` | The reviewer model, passed to the provider |
 | `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent. `claude-code` is the only accepted value; any other is a usage error that lists the accepted ones |
 | `AGENT_REVIEW_MENTION` | `@agent-review` | The keyword `comment` looks for. `@claude` always works as an alias |
-| `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
+| `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. `comment` requires it: empty, `your-github-login` and anything starting with `EDIT` are refused. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
 | `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files |
-| `AGENT_REVIEW_COMMENT_AUTHOR` | unset | `comment` only: the comment author's login. With `AGENT_REVIEW_OPERATOR` set, a different author makes `comment` do nothing and exit 0 |
+| `AGENT_REVIEW_COMMENT_AUTHOR` | unset | `comment` only: the comment author's login. A different author than `AGENT_REVIEW_OPERATOR` makes `comment` do nothing and exit 0 |
 
 Budgets and sizes must be positive numbers; batch lines and chars, positive integers. Anything
 else is a usage error.

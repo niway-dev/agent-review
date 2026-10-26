@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "./config";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { comment, review, type Deps, type GhFn, type ReviewOutput } from "./engine";
 import type { ProviderAdapter, ProviderRequest, ProviderResult } from "./providers/types";
 
@@ -213,4 +216,51 @@ describe("comment", () => {
     comment(deps, "o/r", 7, "no mention here", "boss");
     expect(provider.requests).toHaveLength(0);
   });
+});
+
+describe("the head directory", () => {
+  test("is the agent's cwd and the only place the focus file is read from", () => {
+    const head = mkdtempSync(join(tmpdir(), "head-"));
+    mkdirSync(join(head, ".github"));
+    writeFileSync(join(head, ".github", "agent-review.md"), "FOCUS-FROM-THE-HEAD");
+    const posted: { review?: { body: string; comments: unknown[] } } = {};
+    const provider = new FakeProvider([
+      () => ({ structuredOutput: out({ files_reviewed: [MANAGER, STORE, GUIDE, LOGO], summary: "ok" }) }),
+    ]);
+    const deps: Deps = {
+      gh: fakeGh(posted),
+      provider,
+      config: loadConfig({}),
+      repoDir: head,
+      log: () => {},
+      warn: () => {},
+    };
+    review(deps, "o/r", 7, []);
+    expect(provider.requests[0].cwd).toBe(head);
+    expect(provider.requests[0].prompt).toContain("FOCUS-FROM-THE-HEAD");
+  });
+});
+
+describe("comment with an operator that is not a real login", () => {
+  const depsFor = (operator: string) => {
+    const provider = new FakeProvider([]);
+    const deps: Deps = {
+      gh: () => {
+        throw new Error("must not call GitHub");
+      },
+      provider,
+      config: loadConfig(operator === "" ? {} : { AGENT_REVIEW_OPERATOR: operator }),
+      log: () => {},
+      warn: () => {},
+    };
+    return { deps, provider };
+  };
+
+  for (const operator of ["", "   ", "EDIT-THIS-github-login", "your-github-login", "Your-GitHub-Login", "EDIT-ME", "edit"]) {
+    test(`refuses "${operator}" before reading the comment or calling anything`, () => {
+      const { deps, provider } = depsFor(operator);
+      expect(() => comment(deps, "o/r", 7, "@agent-review review", "someone")).toThrow(/operator login/);
+      expect(provider.requests).toHaveLength(0);
+    });
+  }
 });

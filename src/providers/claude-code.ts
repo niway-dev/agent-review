@@ -35,6 +35,38 @@ export function leaksKey(texts: string[], key: string) {
   return texts.some((t) => (key !== "" && t.includes(key)) || KEY_SHAPE.test(t));
 }
 
+/**
+ * The only variables the agent CLI inherits. An allowlist, not "everything but two names": the
+ * parent process holds `GH_TOKEN` and may carry anything a runner or a repository file added
+ * (`ANTHROPIC_BASE_URL`, `HTTPS_PROXY`, `NODE_OPTIONS`, `BUN_*`), and any of those could send the
+ * API key to another host or run code in the agent.
+ */
+export const CHILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TERM",
+  "LANG",
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CONFIG_DIR",
+  "CI",
+  "GITHUB_ACTIONS",
+] as const;
+
+/** `LC_ALL`, `LC_CTYPE`, … along with the exact names above. */
+const LOCALE_PREFIX = "LC_";
+
+export function buildChildEnv(env: Record<string, string | undefined>) {
+  const child: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if ((CHILD_ENV_ALLOWLIST as readonly string[]).includes(name) || name.startsWith(LOCALE_PREFIX)) {
+      child[name] = value;
+    }
+  }
+  return child;
+}
+
 /** The adapter's own settings, next to this file. */
 export function findEngineSettings(dir: string) {
   const path = join(dir, SETTINGS_FILE);
@@ -116,7 +148,10 @@ export class ClaudeCodeProvider implements ProviderAdapter {
 
   preflight() {
     findEngineSettings(this.settingsDir);
-    const probe = spawnSync(this.binary, ["--version"], { encoding: "utf8" });
+    const probe = spawnSync(this.binary, ["--version"], {
+      encoding: "utf8",
+      env: buildChildEnv(process.env),
+    });
     if (probe.error || probe.status !== 0) {
       throw new Error(
         `The Claude Code binary "${this.binary}" did not run (--version): ${probe.error ?? probe.stderr}`,
@@ -137,10 +172,8 @@ export class ClaudeCodeProvider implements ProviderAdapter {
   }
 
   run(request: ProviderRequest): ProviderResult {
-    // The agent never gets a GitHub token: the engine, not the agent, posts.
-    const childEnv = { ...process.env };
-    delete childEnv.GH_TOKEN;
-    delete childEnv.GITHUB_TOKEN;
+    // The agent never gets a GitHub token, a base URL or a proxy: see CHILD_ENV_ALLOWLIST.
+    const childEnv = buildChildEnv(process.env);
     const args = buildClaudeArgs({
       addDirs: request.addDirs,
       budgetUsd: request.maxBudgetUsd,

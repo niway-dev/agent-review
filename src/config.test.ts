@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadConfig, UsageError } from "./config";
+import { loadConfig, operatorProblem, UsageError } from "./config";
 
 const load = (env: Record<string, string>) => {
   const warnings: string[] = [];
@@ -58,5 +58,16 @@ describe("loadConfig", () => {
     expect(() => load({ AGENT_REVIEW_BUDGET_USD: "abc" })).toThrow(UsageError);
     expect(() => load({ AGENT_REVIEW_BATCH_LINES: "1.5" })).toThrow(UsageError);
     expect(() => load({ AGENT_REVIEW_BATCH_BUDGET_USD: "0" })).toThrow(UsageError);
+  });
+});
+
+describe("operatorProblem", () => {
+  test("flags empty and placeholder logins, accepts a real one", () => {
+    expect(operatorProblem(undefined)).toContain("empty");
+    expect(operatorProblem("")).toContain("empty");
+    expect(operatorProblem("EDIT-THIS-github-login")).toContain("placeholder");
+    expect(operatorProblem("your-github-login")).toContain("placeholder");
+    expect(operatorProblem("editor-bot")).toContain("placeholder"); // anything starting with "edit"
+    expect(operatorProblem("csdev19")).toBeUndefined();
   });
 });

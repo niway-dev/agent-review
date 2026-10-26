@@ -16,6 +16,8 @@ permission ceiling; the reusable workflow in this repository runs the engine.
 3. **Set the operator.** Replace `operator: EDIT-THIS-github-login` with the GitHub login of the
    one person who may start reviews by comment. Only that login's `@agent-review` (or
    `@claude`) comments start a run.
+   The jobs fail with a clear error while `operator` is empty or still a placeholder
+   (`EDIT…`, `your-github-login`), because anyone could register a placeholder login.
 
 Open a pull request. The automatic review runs when it opens or leaves draft.
 

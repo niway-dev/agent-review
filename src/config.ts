@@ -13,7 +13,7 @@ export interface EngineConfig {
   model: string;
   provider: string;
   mention: string;
-  /** Login allowed to command the tool; empty when the workflow is the only check. */
+  /** Login allowed to command the tool. `comment` refuses to run when it is empty or a placeholder. */
   operator: string;
   /** Extra exclude globs on top of the built-in ones. */
   exclude: string[];
@@ -60,4 +60,22 @@ export function loadConfig(env: Env, warn: (line: string) => void = console.erro
     operator: get("OPERATOR") ?? "",
     exclude: (get("EXCLUDE") ?? "").split(",").filter(Boolean),
   };
+}
+
+/** Template values that look like a login but belong to nobody the consumer chose. */
+const PLACEHOLDER_OPERATORS = ["your-github-login"];
+
+/**
+ * Why `operator` cannot be trusted as the operator's login, or undefined when it can. The
+ * templates ship placeholders that are valid, possibly registrable logins: whoever registered one
+ * would become the operator of every repository that forgot to edit it.
+ */
+export function operatorProblem(operator: string | undefined): string | undefined {
+  const login = (operator ?? "").trim();
+  if (login === "") return "The operator login is empty. Set `operator` (AGENT_REVIEW_OPERATOR) to your GitHub login.";
+  const lower = login.toLowerCase();
+  if (lower.startsWith("edit") || PLACEHOLDER_OPERATORS.includes(lower)) {
+    return `The operator login is still the template placeholder "${login}". Set \`operator\` (AGENT_REVIEW_OPERATOR) to your GitHub login.`;
+  }
+  return undefined;
 }

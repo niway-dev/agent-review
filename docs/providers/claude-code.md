@@ -24,8 +24,33 @@ Always added by the adapter, whatever the engine asks: `--restricted`, `--strict
 `--settings <claude-code.settings.json>` and `--disallowedTools
 Bash,Read(//proc/**),Grep(//proc/**),Glob(//proc/**)`. The settings file denies the same set.
 
-The child process environment is the parent's without `GH_TOKEN` and `GITHUB_TOKEN`: the agent
-never holds a GitHub credential; the engine posts.
+## The child environment
+
+The adapter builds the `claude` process environment from an allowlist (`CHILD_ENV_ALLOWLIST` and
+`buildChildEnv` in `src/providers/claude-code.ts`), not from a copy of the parent's environment.
+Only these variables are passed, and only when they are set:
+
+| Variable | Why |
+| --- | --- |
+| `PATH` | Finds `claude` and the tools it launches |
+| `HOME` | Where Claude Code keeps its state |
+| `TMPDIR` | Temporary files |
+| `TERM` | Terminal capabilities |
+| `LANG` and every `LC_*` | Locale |
+| `ANTHROPIC_API_KEY` | The credential the agent exists to use |
+| `CLAUDE_CONFIG_DIR` | A non-default Claude Code configuration folder, if the operator set one |
+| `CI`, `GITHUB_ACTIONS` | Tell Claude Code it runs unattended |
+
+Nothing else reaches the agent. In particular it never receives `GH_TOKEN` or `GITHUB_TOKEN` (the
+engine posts, not the agent), `ANTHROPIC_BASE_URL` or any `*_PROXY` variable (which could send the
+API key to another host), `NODE_OPTIONS`, `NODE_EXTRA_CA_CERTS`, `BUN_*` or `LD_PRELOAD`. The same
+list is used for the `claude --version` probe. A test feeds a poisoned environment through a stub
+binary and checks that none of those names arrive. If a runner needs another variable (for
+example a corporate proxy), it has to be added to the list in code, on purpose.
+
+The engine itself runs with `bun --no-env-file`, so a `.env` file in the reviewed head cannot add
+variables to the engine process either; see [SECURITY.md](../../SECURITY.md).
+
 
 The footer label is built from the model name and `claude --version`, for example "Claude Sonnet
 5.5 via Claude Code 2.1.304". Credential detection (`leaksSecret`) matches the exact

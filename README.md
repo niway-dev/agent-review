@@ -40,8 +40,8 @@ There will be three ways. Only the second works today.
 ## Usage
 
 ```sh
-bun src/cli.ts review <pr> [paths…]    # review a pull request
-bun src/cli.ts comment <pr>            # handle the operator's comment in $REQUEST
+bun --no-env-file --config=bunfig.toml src/cli.ts review <pr> [paths…] --repo-dir <head>
+bun --no-env-file --config=bunfig.toml src/cli.ts comment <pr> --repo-dir <head>   # the comment is in $REQUEST
 ```
 
 Settings, environment and exit codes: [docs/cli.md](docs/cli.md). The agent behind it, and what
