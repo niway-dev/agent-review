@@ -1,7 +1,8 @@
 # Releasing
 
-For the maintainer. Consumers call `review.yml@v1`, so a tag is a trust decision: whoever
-controls it controls code that runs with the consumers' API key.
+For the maintainer. Consumers pin an exact release tag (`review.yml@v1.0.0`) and receive each
+new release as a Dependabot pull request, so a tag is a trust decision: whoever controls it
+controls code that runs with the consumers' API key, and an exact tag must never move.
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please). Your
 job is to merge the release pull request. Nothing is published to npm; that stays deferred.
@@ -10,9 +11,8 @@ Both `main` and the `v*` tags are protected by repository rulesets. `main` requi
 requests, so every change, including a release, lands through one. Tags `v*` cannot be moved or
 deleted except through a repository admin bypass; the alias step below needs that bypass.
 
-Current state: the exact tags `v1.0.0-rc.1` and `v1.0.0-rc.2` exist (rc.2 is at `2646cdd` and passed
-a live run in a consumer). `v1` still points at rc.1 until the owner moves it or release-please
-does; `v1.0.0` has not been cut yet.
+Current state: `v1.0.0` is released, and the pre-release tags `v1.0.0-rc.1` and `v1.0.0-rc.2`
+stay as history. The floating `v1` tag points at `v1.0.0`.
 
 ## How a release happens
 
@@ -24,7 +24,8 @@ does; `v1.0.0` has not been cut yet.
 3. You review the notes and merge that pull request.
 4. On the merge, release-please creates the exact tag `vX.Y.Z` (immutable) and a GitHub Release
    with the same notes.
-5. The last workflow step moves the floating major tag (`v1`) to the release commit.
+5. The last workflow step moves the floating major tag (`v1`) to the release commit, for the
+   callers that still use it. Recommended installs pin the exact tag and are not affected.
 
 Configuration: `release-please-config.json` and `.release-please-manifest.json`.
 
@@ -37,8 +38,9 @@ git tag -f v1 <release-sha>
 git push -f origin v1
 ```
 
-It skips pre-releases (a tag containing `-`). Consumers who pin `@v1` get the new release; the
-exact tag `v1.x.y` and the SHA never move. If the secret is missing, or the push fails, the step
+It skips pre-releases (a tag containing `-`). Only callers on the floating `@v1` get the new
+release at once; recommended installs pin `@v1.x.y`, receive it as a Dependabot pull request, and
+the exact tag never moves. If the secret is missing, or the push fails, the step
 does not fail the run: it prints a warning and the two commands above in the run summary. Run
 them as a repository admin. This is also the only manual tag instruction left.
 
@@ -71,18 +73,23 @@ Settings, Environments, `production` (create it if missing), "Add environment se
 - Exact tags (`v1.0.0`) and commit SHAs never move.
 - Never create or edit `v*.*.*` tags by hand: release-please owns them.
 
-## Pinning: `@v1` versus a SHA
+## Pinning: an exact tag is the recommendation
 
-- `@v1` follows every compatible release. Consumers use it to receive fixes without editing.
-- `@v1.2.3` is immutable and readable.
-- `@<40-character-sha>` is the strongest pin and what to use when freezing. The engine is checked
-  out at the same commit as the workflow. To find a release's SHA: `git rev-parse v1.2.3^{commit}`.
+- `@v1.2.3` is the recommended pin: immutable under the `v*` ruleset, readable in the caller, and
+  updated through a Dependabot pull request that the consumer reads first. A consumer undoes a bad
+  release by editing the tag back, without waiting for the maintainer.
+- `@v1` follows every compatible release without the consumer's consent. It is kept for callers
+  that installed it and is not offered in the docs or the template (ADR 0001, amendment of
+  2026-10-26).
+- `@<40-character-sha>` is accepted by GitHub and adds nothing over an exact tag while the `v*`
+  ruleset holds; it is not recommended because it is unreadable in the caller.
 
 ## Hotfix
 
 1. Branch from `main`, fix, and open a pull request titled `fix: ...`.
 2. Merge it. The release pull request updates itself to the next patch version.
-3. Merge the release pull request. `v1` moves to the fix.
+3. Merge the release pull request. Dependabot offers the fix to each consumer; `v1` moves to it
+   for the callers that still use the floating tag.
 
 If `main` has unreleased work that must not ship yet, hold the release PR unmerged only if the
 other changes are already acceptable to ship, because it contains everything on `main`. There is

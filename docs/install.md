@@ -1,9 +1,10 @@
 # Install with the reusable workflow
 
-Tags: `v1` floats and moves only for backward-compatible releases; exact tags such as `v1.0.0-rc.2`
-never move; pinning a full commit SHA is the strict option. Today `v1` still points at the
-release candidate `v1.0.0-rc.1` until the owner or release-please moves it. A SHA must be a commit
-of `niway-dev/agent-review`, not of your own repository (see "How updates arrive").
+Pin an exact release tag, such as `v1.0.0`. Exact tags never move, so the engine that runs with
+your key is the one you read when you chose the tag, and every update is a change to your caller
+file that you make or approve (see "How updates arrive"). The floating `v1` tag exists for
+compatibility but is not recommended: it moves on every compatible release, so a release you have
+not seen would run with your key.
 
 Your repository keeps one short caller file. It owns the triggers, the secret it passes and the
 permission ceiling; the reusable workflow in this repository runs the engine.
@@ -12,7 +13,8 @@ permission ceiling; the reusable workflow in this repository runs the engine.
 
 1. **Add the caller file.** Copy
    [`templates/agent-review-caller.yml`](../templates/agent-review-caller.yml) to
-   `.github/workflows/agent-review.yml`.
+   `.github/workflows/agent-review.yml`. Its `uses:` line names the latest exact release tag;
+   check the [releases](https://github.com/niway-dev/agent-review/releases) if you want another.
 2. **Add the secret.** Create an Anthropic API key at <https://console.anthropic.com> and save it
    as the repository secret `ANTHROPIC_API_KEY` (Settings, Secrets and variables, Actions).
 3. **Set the operator.** Replace `operator: EDIT-THIS-github-login` with the GitHub login of the
@@ -67,15 +69,33 @@ input here; they exist only in the copy-the-files install.
 
 ## How updates arrive
 
-- **Compatible fixes** arrive through the floating `v1` tag: the maintainer moves it only for
-  backward-compatible releases. Each run records the exact engine commit in its job summary.
-- **A policy change or a new major version** never rides a tag move. It arrives as a pull request
-  to your repository (a new `@v2` in the caller, or a policy update you review).
-- **Pinning by SHA.** To freeze, replace `@v1` with a full commit SHA *of this repository*
-  (`niway-dev/agent-review`, not of your own repository), for example
-  `uses: niway-dev/agent-review/.github/workflows/review.yml@<40-character-sha>`. The engine is
-  checked out at the same commit, so engine and workflow can never differ. You then update by
-  editing the SHA.
+- **Every release is a pull request to your repository.** Add Dependabot for GitHub Actions and
+  it opens one pull request per new release, changing only the tag in the `uses:` line, with the
+  release notes linked. You read it and merge it, or close it. Nothing runs with your key before
+  that. The reusable workflow skips Dependabot's own pull requests, so they cost no review budget.
+
+  ```yaml
+  # .github/dependabot.yml
+  version: 2
+  updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+        interval: weekly
+  ```
+
+- **A bad release is undone by you, not by the maintainer.** If a release turns out to be broken
+  or compromised, edit the tag in your caller back to the previous release and merge. An exact
+  tag never moves, so the previous release is still exactly what it was. The maintainer publishes
+  a fixed release, and Dependabot brings it as the next pull request.
+- **A policy change or a new major version** also arrives as a pull request to your repository (a
+  new `@v2.0.0` in the caller, or a policy update you review). Each run records the exact engine
+  commit in its job summary.
+- **The floating `v1` tag** moves on every compatible release. It is kept for callers that
+  installed it, and it is not recommended: whoever can move that tag runs code with your key, and a
+  release reaches your repository before you have seen it. A full commit SHA is also accepted by
+  GitHub but is not needed: an exact tag is protected by this repository's ruleset, which forbids
+  moving or deleting `v*` tags, and a tag stays readable in your file where a SHA does not.
 
 ## Private repositories
 
