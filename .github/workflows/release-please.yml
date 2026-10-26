@@ -47,7 +47,9 @@ jobs:
       - name: Move the floating major tag
         if: ${{ steps.rp.outputs.release_created == 'true' && !contains(steps.rp.outputs.tag_name, '-') }}
         env:
-          TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
+          # One secret is enough: RELEASE_PLEASE_TOKEN moves the alias too. RELEASE_TAG_TOKEN is an
+          # optional override for owners who want a separate, narrower token for tag moves.
+          TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN || secrets.RELEASE_PLEASE_TOKEN }}
           REPO: ${{ github.repository }}
           MAJOR_TAG: v${{ steps.rp.outputs.major }}
           RELEASE_TAG: ${{ steps.rp.outputs.tag_name }}
@@ -68,7 +70,7 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           }
           if [ -z "${TAG_TOKEN}" ]; then
-            warn "The secret RELEASE_TAG_TOKEN is not set, so ${RELEASE_TAG} was released but the alias stayed where it was."
+            warn "Neither RELEASE_TAG_TOKEN nor RELEASE_PLEASE_TOKEN is set, so ${RELEASE_TAG} was released but the alias stayed where it was."
             exit 0
           fi
           git init -q alias && cd alias

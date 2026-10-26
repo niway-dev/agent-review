@@ -47,9 +47,9 @@ them as a repository admin. This is also the only manual tag instruction left.
 | Secret | Used for | Without it |
 | --- | --- | --- |
 | `RELEASE_PLEASE_TOKEN` | Opens the release PR and creates the tag and Release, so that CI runs on the release PR (events made with `GITHUB_TOKEN` do not start workflows) | Falls back to `GITHUB_TOKEN`: the release PR still opens, but CI does not run on it, so close and reopen it, or push to it, to start checks |
-| `RELEASE_TAG_TOKEN` | Moves the `v1` tag, which the ruleset reserves for admins | The alias step only warns; move `v1` by hand |
+| `RELEASE_TAG_TOKEN` (optional) | Overrides the token used to move the `v1` tag, for owners who want a separate, narrower one. When absent, `RELEASE_PLEASE_TOKEN` moves the tag | Nothing changes: `RELEASE_PLEASE_TOKEN` is used |
 
-Both can hold the same token. Create a fine-grained personal access token owned by a repository
+One secret, `RELEASE_PLEASE_TOKEN`, is all that is needed; it is the same personal access token the maintainer's other repositories use. Create a fine-grained personal access token owned by a repository
 admin (who is a bypass actor of the `v*` tag ruleset), with:
 
 - Resource owner and repository access: only `niway-dev/agent-review`.
