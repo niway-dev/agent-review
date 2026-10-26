@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adrNotices,
   annotateDiff,
   attempt,
+  countLine,
+  dedupeFindings,
+  label,
+  RULES,
+  SCHEMA,
+  SEVERITY,
+  TOPIC,
   buildBatchPrompt,
   type ReviewContext,
   resolveScope,
@@ -292,26 +300,26 @@ describe("assignThreads", () => {
 
 describe("mergeOutputs", () => {
   const finding = (
-    severity: "should_fix" | "note",
+    severity: Finding["severity"],
     title: string,
-    category: Finding["category"] = "correctness",
+    topic: Finding["topic"] = "bug",
   ): Finding => ({
     path: "src/a.ts",
     line: 3,
     severity,
-    category,
+    topic,
     title,
     body: "",
   });
 
-  test("unions coverage, keeps one finding per line and category, preferring should fix", () => {
+  test("unions coverage, keeps one finding per line and topic, preferring the higher severity", () => {
     const merged = mergeOutputs([
       {
         label: "Batch 1 of 2",
         output: output({
           files_reviewed: ["src/a.ts"],
           files_skipped: [{ path: "src/b.ts", reason: "binary" }],
-          findings: [finding("note", "Caller side")],
+          findings: [finding("consider", "Caller side")],
           summary: "First.",
         }),
       },
@@ -319,7 +327,7 @@ describe("mergeOutputs", () => {
         label: "Batch 1 of 2, retry",
         output: output({
           files_reviewed: ["src/b.ts"],
-          findings: [finding("should_fix", "Callee side")],
+          findings: [finding("fix", "Callee side")],
           summary: "Second.",
         }),
       },
@@ -330,15 +338,15 @@ describe("mergeOutputs", () => {
     expect(merged.summary).toBe("**Batch 1 of 2.** First.\n\n**Batch 1 of 2, retry.** Second.");
   });
 
-  test("keeps two findings on one line when their categories differ", () => {
+  test("keeps two findings on one line when their topics differ", () => {
     const merged = mergeOutputs([
       {
         label: "Batch 1 of 1",
         output: output({
           files_reviewed: ["src/a.ts"],
           findings: [
-            finding("should_fix", "Off by one"),
-            finding("note", "Native tooltip", "rules"),
+            finding("fix", "Off by one"),
+            finding("consider", "Native tooltip", "rules"),
           ],
         }),
       },
@@ -346,16 +354,16 @@ describe("mergeOutputs", () => {
     expect(merged.findings.map((f) => f.title)).toEqual(["Off by one", "Native tooltip"]);
   });
 
-  test("keeps every whole-file finding of a file, one per category", () => {
-    const whole = (category: Finding["category"], title: string): Finding => ({
-      ...finding("note", title, category),
+  test("keeps every whole-file finding of a file, one per topic", () => {
+    const whole = (topic: Finding["topic"], title: string): Finding => ({
+      ...finding("consider", title, topic),
       line: 0,
     });
     const merged = mergeOutputs([
       {
         label: "Batch 1 of 1",
         output: output({
-          findings: [whole("adr", "Contradicts ADR-0073"), whole("other", "Docs not updated")],
+          findings: [whole("adr", "Contradicts ADR-0073"), whole("docs", "Docs not updated")],
         }),
       },
     ]);
@@ -364,6 +372,150 @@ describe("mergeOutputs", () => {
 
   test("keeps a single batch's summary as it is", () => {
     expect(mergeOutputs([{ label: "Batch 1 of 1", output: output() }]).summary).toBe("Looks fine.");
+  });
+});
+
+describe("dedupeFindings", () => {
+  const at3 = (severity: Finding["severity"], title: string): Finding => ({
+    path: "src/a.ts",
+    line: 3,
+    severity,
+    topic: "bug",
+    title,
+    body: "",
+  });
+
+  test("keeps the higher severity, in the order blocker > fix > consider > info", () => {
+    const pick = (a: Finding["severity"], b: Finding["severity"]) =>
+      dedupeFindings([at3(a, a), at3(b, b)]).map((f) => f.title);
+    expect(pick("info", "consider")).toEqual(["consider"]);
+    expect(pick("consider", "fix")).toEqual(["fix"]);
+    expect(pick("blocker", "fix")).toEqual(["blocker"]);
+    expect(pick("fix", "blocker")).toEqual(["blocker"]);
+  });
+
+  test("keeps the first of two at the same severity", () => {
+    expect(dedupeFindings([at3("fix", "First"), at3("fix", "Second")]).map((f) => f.title)).toEqual([
+      "First",
+    ]);
+  });
+});
+
+describe("adrNotices", () => {
+  test("gives one info notice per changed decision record, at any depth", () => {
+    const notices = adrNotices([
+      "docs/adr/0003-x.md",
+      "packages/x/docs/adr/0001.md",
+      "src/engine.ts",
+      "docs/architecture.md",
+      "mydocs/adr/0001.md",
+      "docs/adrs/0001.md",
+    ]);
+    expect(notices.map((f) => f.path)).toEqual(["docs/adr/0003-x.md", "packages/x/docs/adr/0001.md"]);
+    expect(notices[0]).toEqual({
+      path: "docs/adr/0003-x.md",
+      line: 0,
+      severity: "info",
+      topic: "adr",
+      title: "Edits an accepted decision record",
+      body: "This pull request edits an accepted decision record. If the change supersedes a decision, say so in the record.",
+    });
+  });
+
+  test("gives nothing when no decision record changed", () => {
+    expect(adrNotices(["README.md", "src/adr.ts"])).toEqual([]);
+  });
+
+  test("collapses with the model's own info notice on the same file", () => {
+    const model: Finding = {
+      path: "docs/adr/0003-x.md",
+      line: 0,
+      severity: "info",
+      topic: "adr",
+      title: "ADR edited",
+      body: "The model noticed too.",
+    };
+    const kept = dedupeFindings([...adrNotices(["docs/adr/0003-x.md"]), model]);
+    expect(kept.map((f) => f.title)).toEqual(["Edits an accepted decision record"]);
+  });
+});
+
+describe("label", () => {
+  const f = (severity: Finding["severity"], topic: Finding["topic"], title: string): Finding => ({
+    path: "a.ts",
+    line: 1,
+    severity,
+    topic,
+    title,
+    body: "",
+  });
+
+  test("puts both emojis first, then the severity, topic and title in words", () => {
+    expect(label(f("fix", "docs", "stale 'Read by' cell"))).toBe(
+      "🟠📝 **Fix · docs: stale 'Read by' cell**",
+    );
+    expect(label(f("blocker", "security", "DATABASE_URL printed"))).toBe(
+      "🔴🔐 **Blocker · security: DATABASE_URL printed**",
+    );
+    expect(label(f("consider", "cleanup", "Duplicate schema"))).toBe(
+      "🟡🧹 **Consider · cleanup: Duplicate schema**",
+    );
+    expect(label(f("info", "adr", "Edits a record"))).toBe("⚪🏛️ **Info · adr: Edits a record**");
+  });
+
+  test("has an emoji and a word for every severity and topic", () => {
+    for (const entry of [...Object.values(SEVERITY), ...Object.values(TOPIC)]) {
+      expect(entry.emoji.length).toBeGreaterThan(0);
+      expect(entry.word.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("countLine", () => {
+  const of = (...severities: Finding["severity"][]): Finding[] =>
+    severities.map((severity, i) => ({
+      path: "a.ts",
+      line: i,
+      severity,
+      topic: "bug",
+      title: "",
+      body: "",
+    }));
+
+  test("names every group that has findings", () => {
+    expect(countLine(of("blocker", "fix", "fix", "consider"))).toBe(
+      "4 finding(s): 1 blocker(s), 2 to fix, 1 to consider",
+    );
+  });
+
+  test("omits the groups with none", () => {
+    expect(countLine(of("fix", "consider", "consider"))).toBe("3 finding(s): 1 to fix, 2 to consider");
+    expect(countLine(of("blocker"))).toBe("1 finding(s): 1 blocker(s)");
+  });
+
+  test("says only the total when nothing is in a group, and 0 findings when there are none", () => {
+    expect(countLine(of("info"))).toBe("1 finding(s)");
+    expect(countLine([])).toBe("0 findings");
+  });
+});
+
+describe("SCHEMA", () => {
+  const finding = SCHEMA.properties.findings.items;
+
+  test("asks for a severity and a topic from the label tables, and nothing else", () => {
+    expect(finding.required).toEqual(["path", "line", "severity", "topic", "title", "body"]);
+    expect(finding.properties.severity.enum).toEqual(["blocker", "fix", "consider", "info"]);
+    expect(finding.properties.topic.enum).toEqual([
+      "bug",
+      "security",
+      "rules",
+      "adr",
+      "docs",
+      "tests",
+      "perf",
+      "cleanup",
+      "question",
+    ]);
   });
 });
 
@@ -422,16 +574,16 @@ describe("buildReview", () => {
           {
             path: "src/a.ts",
             line: 2,
-            severity: "should_fix",
-            category: "correctness",
+            severity: "fix",
+            topic: "bug",
             title: "Off by one",
             body: "Fails for an empty list.",
           },
           {
             path: "src/a.ts",
             line: 1,
-            severity: "note",
-            category: "other",
+            severity: "consider",
+            topic: "cleanup",
             title: "Naming",
             body: "Consider a clearer name.",
           },
@@ -443,16 +595,16 @@ describe("buildReview", () => {
         path: "src/a.ts",
         line: 2,
         side: "RIGHT",
-        body: "**Should fix (correctness): Off by one**\n\nFails for an empty list.",
+        body: "🟠🐛 **Fix · bug: Off by one**\n\nFails for an empty list.",
       },
       {
         path: "src/a.ts",
         line: 1,
         side: "RIGHT",
-        body: "**Note (other): Naming**\n\nConsider a clearer name.",
+        body: "🟡🧹 **Consider · cleanup: Naming**\n\nConsider a clearer name.",
       },
     ]);
-    expect(review.body).toContain("2 finding(s), 1 to fix; 2 on their lines");
+    expect(review.body).toContain("2 finding(s): 1 to fix, 1 to consider; 2 on their lines");
     expect(review.body).not.toContain("block");
     expect(review.body).toContain(marker("head1234567"));
   });
@@ -466,8 +618,8 @@ describe("buildReview", () => {
           {
             path: "src/b.ts",
             line: 9,
-            severity: "should_fix",
-            category: "security",
+            severity: "blocker",
+            topic: "security",
             title: "Key in log",
             body: "Remove it.",
           },
@@ -476,7 +628,43 @@ describe("buildReview", () => {
     });
     expect(review.comments).toEqual([]);
     expect(review.body).toContain("### Outside the diff");
-    expect(review.body).toContain("**Should fix (security): Key in log** (`src/b.ts:9`)");
+    expect(review.body).toContain("🔴🔐 **Blocker · security: Key in log** (`src/b.ts:9`)");
+  });
+
+  test("puts info findings in the body under their own heading, never inline, even on a diff line", () => {
+    const review = buildReview({
+      ...base,
+      output: output({
+        files_reviewed: ["src/a.ts"],
+        findings: [
+          {
+            path: "src/a.ts",
+            line: 2,
+            severity: "info",
+            topic: "question",
+            title: "Heads up",
+            body: "Nothing to change.",
+          },
+          ...adrNotices(["docs/adr/0001-x.md"]),
+        ],
+      }),
+    });
+    expect(review.comments).toEqual([]);
+    expect(review.body).not.toContain("### Outside the diff");
+    expect(review.body).toContain("2 finding(s); 0 on their lines");
+    const info = review.body.slice(review.body.indexOf("### For your information"));
+    expect(info).toContain("- ⚪❓ **Info · question: Heads up** (`src/a.ts:2`): Nothing to change.");
+    expect(info).toContain(
+      "- ⚪🏛️ **Info · adr: Edits an accepted decision record** (`docs/adr/0001-x.md`): This pull request edits",
+    );
+    expect(review.body.indexOf("### For your information")).toBeLessThan(
+      review.body.indexOf("### Summary"),
+    );
+  });
+
+  test("says 0 findings when there are none", () => {
+    const review = buildReview({ ...base, output: output({ files_reviewed: ["src/a.ts"] }) });
+    expect(review.body).toContain("0 findings; 0 on their lines");
   });
 
   test("opens with a partial-coverage warning when files are missing", () => {
@@ -539,12 +727,12 @@ describe("moveCommentsToBody", () => {
     const moved = moveCommentsToBody({
       body: "Summary",
       comments: [
-        { path: "a.ts", line: 3, side: "RIGHT", body: "**Should fix (correctness): X**\n\nY" },
+        { path: "a.ts", line: 3, side: "RIGHT", body: "🟠🐛 **Fix · bug: X**\n\nY" },
       ],
     });
     expect(moved.comments).toEqual([]);
     expect(moved.body).toContain("`a.ts:3`");
-    expect(moved.body).toContain("Should fix (correctness): X");
+    expect(moved.body).toContain("- `a.ts:3`: 🟠🐛 **Fix · bug: X** Y");
   });
 });
 
@@ -647,6 +835,15 @@ describe("buildBatchPrompt", () => {
     expect(prompt(true)).toContain("/tmp/d/threads.json");
     expect(prompt()).not.toContain("second pass");
     expect(prompt(false, { index: 1, total: 2, retry: true })).toContain("second pass");
+  });
+
+  test("teaches both label axes and leaves the ADR-edited notice to the engine", () => {
+    const text = prompt();
+    expect(text).toContain(RULES);
+    for (const key of [...Object.keys(SEVERITY), ...Object.keys(TOPIC)])
+      expect(RULES).toContain(`"${key}":`);
+    expect(RULES).toContain("Never report that the pull request edits a file in docs/adr/");
+    expect(RULES).not.toMatch(/should_fix|"note"|"other"|correctness/);
   });
 });
 

@@ -2,7 +2,8 @@ name: Agent review
 
 # An advisory code review by an agent CLI (today Claude Code), paid from the Anthropic Console
 # API credits through the `ANTHROPIC_API_KEY` secret. It is a GitHub review: each finding is a comment on its
-# line, labelled "Should fix" or "Note", that the owner can answer in its thread. It is
+# line, labelled with a severity and a topic (for example "🟠📝 Fix · docs"), that the owner can
+# answer in its thread; information that needs no reply goes in the review body. It is
 # advisory: never a required check, never an approval or a change request, never a merge
 # gate. What to look for beyond the defaults is in `.github/agent-review.md`.
 #

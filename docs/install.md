@@ -31,7 +31,8 @@ because GitHub runs `issue_comment` workflows from the default branch.
 
 Add `.github/agent-review.md` to say what this repository's reviews should look at beyond the
 defaults (for example "payments code must never log card data"). It is read from the reviewed
-branch, so treat it like any other file a pull request can change.
+branch, so treat it like any other file a pull request can change. It cannot add severities or
+topics to the finding labels (see [cli.md](cli.md#finding-labels)).
 
 ## Optional: settings
 

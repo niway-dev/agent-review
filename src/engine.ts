@@ -13,7 +13,9 @@
  * still not accounted for makes the review "partial", on its first line.
  *
  * Findings become inline review comments on their lines, so the operator can answer each one in
- * its thread; a finding outside the diff goes in the review body. The review is advisory: it never
+ * its thread; a finding outside the diff, and every "info" finding, goes in the review body. Each
+ * finding is labelled on two axes, a severity and a topic (`SEVERITY`, `TOPIC`). The engine adds
+ * its own "info" notice for every changed decision record (`adrNotices`). The review is advisory: it never
  * approves, requests changes or blocks a merge. On a re-review, the agent reads its open threads
  * and the operator's replies and answers in each thread. It never resolves one.
  *
@@ -40,13 +42,45 @@ export interface PrFile {
   patch?: string;
 }
 
+/**
+ * Severity answers "when does the author act on this". The keys are in rank order, highest first:
+ * when two batches report the same defect, the higher one is kept. This table and `TOPIC` are the
+ * only place a label's emojis live; the word always follows the emoji, so a label stays searchable
+ * and readable without emoji fonts or by a screen reader.
+ */
+export const SEVERITY = {
+  blocker: { emoji: "🔴", word: "Blocker" },
+  fix: { emoji: "🟠", word: "Fix" },
+  consider: { emoji: "🟡", word: "Consider" },
+  info: { emoji: "⚪", word: "Info" },
+} as const;
+
+/** Topic answers "what is the finding about". There is no catch-all: an unclassifiable finding is a question. */
+export const TOPIC = {
+  bug: { emoji: "🐛", word: "bug" },
+  security: { emoji: "🔐", word: "security" },
+  rules: { emoji: "📜", word: "rules" },
+  adr: { emoji: "🏛️", word: "adr" },
+  docs: { emoji: "📝", word: "docs" },
+  tests: { emoji: "🧪", word: "tests" },
+  perf: { emoji: "⚡", word: "perf" },
+  cleanup: { emoji: "🧹", word: "cleanup" },
+  question: { emoji: "❓", word: "question" },
+} as const;
+
+export type Severity = keyof typeof SEVERITY;
+export type Topic = keyof typeof TOPIC;
+const SEVERITIES = Object.keys(SEVERITY) as Severity[];
+const TOPICS = Object.keys(TOPIC) as Topic[];
+
 export interface Finding {
   path: string;
   /** A new-side line, or 0 for a finding about the whole file. */
   line: number;
-  /** "should_fix": a correctness or security defect. "note": anything else worth reading. */
-  severity: "should_fix" | "note";
-  category: "correctness" | "security" | "rules" | "adr" | "other";
+  /** When the author acts: see `SEVERITY`. "info" never becomes an inline thread. */
+  severity: Severity;
+  /** What the finding is about: see `TOPIC`. */
+  topic: Topic;
   title: string;
   body: string;
 }
@@ -95,8 +129,9 @@ export const DEFAULT_EXCLUDE = [
 // The old marker is still read so repositories reviewed before the rename keep their incremental state.
 const MARKER = /<!-- (?:agent-review|claude-review) sha=([A-Za-z0-9]+) -->/;
 const short = (sha: string) => sha.slice(0, 7);
-const label = (f: Finding) =>
-  `**${f.severity === "should_fix" ? "Should fix" : "Note"} (${f.category}): ${f.title}**`;
+/** `🟠📝 **Fix · docs: stale cell**`: both emojis, then the severity, topic and title in words. */
+export const label = (f: Finding) =>
+  `${SEVERITY[f.severity].emoji}${TOPIC[f.topic].emoji} **${SEVERITY[f.severity].word} · ${TOPIC[f.topic].word}: ${f.title}**`;
 const at = (f: { path: string; line: number }) => (f.line > 0 ? `${f.path}:${f.line}` : f.path);
 
 /** The mention that always works besides the configured keyword, during the migration. */
@@ -293,10 +328,43 @@ export function assignThreads<T extends { path: string }>(threads: T[], batches:
 }
 
 /**
- * One review from the batches' outputs. A finding two batches report on the same line in the
- * same category is one defect, kept once, as "should fix" if either said so; two findings on one
- * line in different categories (a correctness bug and a rule violation on one statement) are
- * two defects and both stay. A file reviewed in a retry counts as reviewed.
+ * One finding per path, line and topic: two reports of the same defect (from two batches, or the
+ * model and the engine's ADR notice) are kept once, at the higher severity; on a tie, the first
+ * wins. Two findings on one line with different topics (a bug and a rule violation on one
+ * statement) are two defects and both stay.
+ */
+export function dedupeFindings(findings: Finding[]): Finding[] {
+  const rank = (f: Finding) => SEVERITIES.indexOf(f.severity);
+  const kept = new Map<string, Finding>();
+  for (const f of findings) {
+    const key = `${f.path}:${f.line}:${f.topic}`;
+    const old = kept.get(key);
+    if (!old || rank(f) < rank(old)) kept.set(key, f);
+  }
+  return [...kept.values()];
+}
+
+/**
+ * The notice that a pull request edits a decision record, one per changed file under a
+ * `docs/adr/` directory at any depth. It comes from the paths, not from the model: it is free,
+ * worded the same every time, and as "info" it never opens a thread the author must answer.
+ */
+export function adrNotices(filenames: string[]): Finding[] {
+  return filenames
+    .filter((name) => /(^|\/)docs\/adr\//.test(name))
+    .map((path) => ({
+      path,
+      line: 0,
+      severity: "info",
+      topic: "adr",
+      title: "Edits an accepted decision record",
+      body: "This pull request edits an accepted decision record. If the change supersedes a decision, say so in the record.",
+    }));
+}
+
+/**
+ * One review from the batches' outputs. Findings are deduplicated by `dedupeFindings`. A file
+ * reviewed in a retry counts as reviewed.
  */
 export function mergeOutputs(parts: { label: string; output: ReviewOutput }[]): ReviewOutput {
   const reviewed = new Set(parts.flatMap((p) => p.output.files_reviewed));
@@ -304,20 +372,13 @@ export function mergeOutputs(parts: { label: string; output: ReviewOutput }[]): 
   for (const p of parts)
     for (const s of p.output.files_skipped)
       if (!reviewed.has(s.path)) skipped.set(s.path, s.reason);
-  const findings = new Map<string, Finding>();
-  for (const p of parts)
-    for (const f of p.output.findings) {
-      const key = `${f.path}:${f.line}:${f.category}`;
-      const kept = findings.get(key);
-      if (!kept || (kept.severity === "note" && f.severity === "should_fix")) findings.set(key, f);
-    }
   const replies = new Map<number, ReviewOutput["thread_replies"][number]>();
   for (const p of parts) for (const r of p.output.thread_replies) replies.set(r.comment_id, r);
   const summaries = parts.filter((p) => p.output.summary.trim() !== "");
   return {
     files_reviewed: [...reviewed],
     files_skipped: [...skipped].map(([path, reason]) => ({ path, reason })),
-    findings: [...findings.values()],
+    findings: dedupeFindings(parts.flatMap((p) => p.output.findings)),
     thread_replies: [...replies.values()],
     summary:
       summaries.length === 1
@@ -415,6 +476,22 @@ export function fitList(items: string[], room: number): string {
   return kept.length > 0 ? `${kept.join(", ")}, ${more}` : more;
 }
 
+/**
+ * "3 finding(s): 1 blocker(s), 2 to fix", with only the groups that have findings: a reader
+ * scanning the body sees at once whether anything blocks. "info" is in the total, not a group.
+ */
+export function countLine(findings: Finding[]): string {
+  if (findings.length === 0) return "0 findings";
+  const count = (s: Severity) => findings.filter((f) => f.severity === s).length;
+  const groups = [
+    [count("blocker"), "blocker(s)"],
+    [count("fix"), "to fix"],
+    [count("consider"), "to consider"],
+  ] as const;
+  const shown = groups.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`);
+  return `${findings.length} finding(s)${shown.length > 0 ? `: ${shown.join(", ")}` : ""}`;
+}
+
 export function buildReview(input: {
   output: ReviewOutput;
   files: PrFile[];
@@ -434,7 +511,10 @@ export function buildReview(input: {
   const commentable = new Map(files.map((f) => [f.filename, commentableLines(f.patch ?? "")]));
   const comments: InlineComment[] = [];
   const outsideDiff: Finding[] = [];
+  // Information asks for no reply, so it never opens a thread, even on a diff line.
+  const forInfo = output.findings.filter((f) => f.severity === "info");
   for (const f of output.findings) {
+    if (f.severity === "info") continue;
     if (commentable.get(f.path)?.has(f.line)) {
       comments.push({
         path: f.path,
@@ -462,16 +542,12 @@ export function buildReview(input: {
       `**Agent review** of ${scope}, at \`${short(headSha)}\`: all ${expected.length} files reviewed.`,
     );
   }
-  const fixes = output.findings.filter((f) => f.severity === "should_fix").length;
   parts.push(
-    `${output.findings.length} finding(s), ${fixes} to fix; ${comments.length} on their lines. Reply in a comment's thread to answer it.`,
+    `${countLine(output.findings)}; ${comments.length} on their lines. Reply in a comment's thread to answer it.`,
   );
-  if (outsideDiff.length > 0) {
-    parts.push(
-      "### Outside the diff",
-      ...outsideDiff.map((f) => `- ${label(f)} (\`${at(f)}\`): ${f.body}`),
-    );
-  }
+  const listed = (f: Finding) => `- ${label(f)} (\`${at(f)}\`): ${f.body}`;
+  if (outsideDiff.length > 0) parts.push("### Outside the diff", ...outsideDiff.map(listed));
+  if (forInfo.length > 0) parts.push("### For your information", ...forInfo.map(listed));
   parts.push("### Summary", output.summary);
   if (batches.length > 0) {
     const rows = batches.map(
@@ -512,7 +588,8 @@ export function moveCommentsToBody(review: Review): Review {
 // ---------------------------------------------------------------------------------------------
 // GitHub and the provider: everything below talks to the network and is exercised by the workflow.
 
-const SCHEMA = {
+/** The structured output the provider must return; the finding enums come from `SEVERITY` and `TOPIC`. */
+export const SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["files_reviewed", "files_skipped", "findings", "thread_replies", "summary"],
@@ -532,12 +609,12 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["path", "line", "severity", "category", "title", "body"],
+        required: ["path", "line", "severity", "topic", "title", "body"],
         properties: {
           path: { type: "string" },
           line: { type: "integer", minimum: 0 },
-          severity: { enum: ["should_fix", "note"] },
-          category: { enum: ["correctness", "security", "rules", "adr", "other"] },
+          severity: { enum: SEVERITIES },
+          topic: { enum: TOPICS },
           title: { type: "string" },
           body: { type: "string" },
         },
@@ -560,13 +637,32 @@ const SCHEMA = {
   },
 };
 
-const RULES = `Severity "should_fix" is only for:
-1. A correctness bug: name the input or state that fails and what happens.
-2. A security problem: credentials, user data, or a trust boundary the change weakens.
-Everything else is a "note": a violation of the repository's CLAUDE.md or AGENTS.md rules, a
-change that contradicts an accepted decision record without superseding it, and anything else
-worth the author's time. Skip praise, style a formatter would catch, and speculation you cannot
-tie to the diff. Write in English.`;
+/** The two label axes in prose for the model; the words match `SEVERITY` and `TOPIC`. */
+export const RULES = `Every finding has a severity, which tells the author when to act, and a topic, which says
+what it is about. Pick the severity by its test, not by how serious the finding feels:
+- "blocker": fix before merging. Only when you can name the input, state or trust boundary that
+  fails if the change merges as is.
+- "fix": wrong today; fix it in this pull request, but it does not block the merge. The fix is
+  specific and the author would not argue with it.
+- "consider": would be better, and the author may decline. A matter of judgement, not a defect.
+- "info": nothing to change, awareness only. It asks for no reply and is never posted on a line.
+Topics:
+- "bug": the code does the wrong thing for some input or state.
+- "security": credentials, user data, or a trust boundary the change weakens.
+- "rules": a violation of CLAUDE.md, AGENTS.md or a repository convention.
+- "adr": the change contradicts an accepted decision record in docs/adr/ without superseding it.
+- "docs": documentation or comments that are stale or contradict the code.
+- "tests": missing coverage, or a test that does not test what its name says.
+- "perf": cost, latency, repeated work, N+1 queries.
+- "cleanup": duplication, dead code, a misleading name.
+- "question": you could not determine something and ask the author.
+Any severity combines with any topic: a README that tells users to run a destructive command is a
+"blocker" with topic "docs". "info" is normally the engine's own notice; if you return one, it goes
+in the review body. A "question" takes the severity of its worst plausible answer: if the answer
+could make it a blocker, the question is a "blocker".
+Never report that the pull request edits a file in docs/adr/: the engine posts that notice itself.
+Report only code that contradicts an accepted decision record.
+Skip praise, style a formatter would catch, and speculation you cannot tie to the diff. Write in English.`;
 
 export const FOCUS_PATH = ".github/agent-review.md";
 /** The path used before the rename; still read, with a notice. */
@@ -884,6 +980,11 @@ export function review(deps: Deps, repo: string, pr: number, words: string[]) {
     throw new Error("The agent did not return a review for any batch.");
   }
   const merged = mergeOutputs(parts);
+  // The engine's notices come first so that, on a tie with the model's own, its wording is kept.
+  merged.findings = dedupeFindings([
+    ...adrNotices(kept.map((f) => f.filename)),
+    ...merged.findings,
+  ]);
   for (const path of notRun)
     merged.files_skipped.push({ path, reason: "not reached: the pull request's budget was spent" });
 

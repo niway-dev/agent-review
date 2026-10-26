@@ -123,7 +123,7 @@ All in `src/engine.ts` unless noted; every change has a test in `src/engine.test
    author login, not the label, so reviews posted with the old labels keep their incremental state.
    No migration.
 7. **Documentation.** `README.md` line 6, `templates/caller-workflow.yml` line 5, and
-   `docs/architecture.md` sections 4 and 6 describe the new labels. `docs/cli.md` gains the two
+   `docs/architecture.md` sections 4 and 8 describe the new labels. `docs/cli.md` gains the two
    tables. The focus-file documentation says a repository may not add severities or topics, so
    every consumer's labels mean the same thing.
 
