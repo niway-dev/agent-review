@@ -16,7 +16,8 @@ your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Pre-release until `v1.0.0`.** The command-line contract is done: one
+**Pre-release until `v1.0.0`, which release-please will cut from Conventional Commits** (see
+[docs/releasing.md](docs/releasing.md)). The command-line contract is done: one
 CLI (`src/cli.ts`, with a `bin` entry) and a provider adapter boundary, documented in
 [docs/cli.md](docs/cli.md) and [docs/providers/claude-code.md](docs/providers/claude-code.md).
 The reusable workflow is written against that contract but untested live. Nothing is tagged yet, so
@@ -95,3 +96,11 @@ unverified: [SECURITY.md](SECURITY.md).
 ## License
 
 GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).
+
+## Commit messages
+
+Releases and the changelog are generated from commit messages, so pull request titles (squash
+merges use them) follow [Conventional Commits](https://www.conventionalcommits.org/):
+`feat:` is a minor release, `fix:` and `perf:` a patch, `feat!:` or a `BREAKING CHANGE:` footer a
+major one. `docs:`, `test:`, `ci:`, `build:`, `chore:` and `style:` appear in no release notes.
+Release pull requests are titled `chore: release X.Y.Z`.

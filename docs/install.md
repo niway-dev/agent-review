@@ -1,7 +1,8 @@
 # Install with the reusable workflow
 
-Pre-release until `v1.0.0`: no tag exists yet, so `@v1` does not resolve today. Until it does,
-pin a full commit SHA of this repository in the caller file.
+Pre-release until `v1.0.0`: `@v1` currently points at the release candidate `v1.0.0-rc.1`. Until
+the first release-please release moves it, pin a full commit SHA of this repository in the caller
+file if you want a fixed engine.
 
 Your repository keeps one short caller file. It owns the triggers, the secret it passes and the
 permission ceiling; the reusable workflow in this repository runs the engine.
