@@ -51,9 +51,10 @@ its hardening covers: [docs/providers/claude-code.md](docs/providers/claude-code
 
 ## Install with the reusable workflow
 
-**Release candidate:** the exact tags `v1.0.0-rc.1` and `v1.0.0-rc.2` exist, and `v1` floats (it still
-points at rc.1 until the owner or release-please moves it). To freeze, pin a full commit SHA of
-this repository instead; see [docs/install.md](docs/install.md).
+**Pin an exact release tag** such as `v1.0.0`: exact tags never move, and a Dependabot pull
+request brings each new release to your repository for you to read before it runs. The floating
+`v1` tag exists but is not recommended: it would run every new release with your key before you
+have seen it. See [docs/install.md](docs/install.md).
 
 Add this file as `.github/workflows/agent-review.yml`, save `ANTHROPIC_API_KEY` as a repository
 secret and set your login as `operator`:
@@ -61,8 +62,9 @@ secret and set your login as `operator`:
 ```yaml
 name: Agent review
 # Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
-# `v1` floats to compatible fixes. To freeze, replace it with a full commit SHA of niway-dev/agent-review
-# (not a commit of your own repository). A tag, even a pre-release, can be moved by an admin; only a SHA is a pin.
+# Pin an exact release tag (`@v1.0.0`): it never moves, every update arrives as a Dependabot pull
+# request you read first, and a bad release is undone by editing the tag back. Do not use the floating
+# `@v1`: it would run each new release with your key before you have seen it.
 # First install: the installing pull request gets only the automatic review. `@agent-review review`
 # and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
 on:
@@ -71,7 +73,7 @@ on:
 permissions: { contents: read, pull-requests: write, issues: read }
 jobs:
   review:
-    uses: niway-dev/agent-review/.github/workflows/review.yml@v1
+    uses: niway-dev/agent-review/.github/workflows/review.yml@v1.0.0
     with:
       operator: EDIT-THIS-github-login
     secrets:
