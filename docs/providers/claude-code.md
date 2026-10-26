@@ -7,7 +7,7 @@ Requirements: the `claude` binary on the `PATH` (the reusable workflow and the c
 version 2.1.304), and `ANTHROPIC_API_KEY` in the environment. A dry run
 (`AGENT_REVIEW_DRY_RUN=1`) does not require the key and uses whatever login the machine has.
 `preflight()` runs before any call is paid for and fails if the binary does not answer
-`--version` or the settings file is missing.
+`--version`, the settings file is missing, or `ANTHROPIC_API_KEY` is unset and it is not a dry run.
 
 ## How the binary is verified
 
@@ -90,8 +90,8 @@ variables to the engine process either; see [SECURITY.md](../../SECURITY.md).
 
 The footer label is built from the model name and `claude --version`, for example "Claude Sonnet
 5.5 via Claude Code 2.1.304". Credential detection (`leaksSecret`) matches the exact
-`ANTHROPIC_API_KEY` and anything shaped like an Anthropic key; the engine refuses to post text
-that matches. An encoded key would pass that check.
+`ANTHROPIC_API_KEY` and anything shaped like an Anthropic key; the engine throws and posts nothing
+when any text matches. An encoded key would pass that check.
 
 ## What each hardening flag is for
 

@@ -3,9 +3,10 @@
  * `ProviderAdapter` to review each one, and posts the result as a GitHub review. The agent CLI
  * itself (flags, binary, hardening) lives in `src/providers/`.
  *
- * Every changed line is read. Files nobody reviews (lockfiles, build output, generated code) are
- * dropped first. The rest are scored by risk (`riskScore`) and packed into batches of about 1,000
- * changed lines (`planBatches`), riskiest first; each batch is one provider call with its diff
+ * Every kept file is accounted for: reviewed, retried, or listed with a closed reason. Files
+ * nobody reviews (lockfiles, build output, generated code, `AGENT_REVIEW_EXCLUDE` matches) are
+ * dropped first and never read. The rest are scored by risk (`riskScore`) and packed into
+ * batches of about 1,000 changed lines (`planBatches`), riskiest first; each batch is one provider call with its diff
  * inside the prompt. A batch that leaves files unaccounted for is re-run once with only those
  * files. Money bounds the run, not size: each batch has its own budget, and once the pull
  * request's budget is spent the remaining batches are listed as not reviewed. A file that is
@@ -20,8 +21,8 @@
  * has one (`.github/claude-review.md` is still read, with a notice).
  *
  * The engine holds the GitHub token and posts; the agent only reads and gets no token. The engine
- * refuses to post text the provider says holds a credential. That is best-effort, not a sandbox:
- * it relies on the consumer repository's trust assumption (only trusted people push).
+ * throws, posting nothing, when the provider says any text to post holds a credential. That is
+ * best-effort, not a sandbox: it relies on the consumer repository's trust assumption (only trusted people push).
  * The command-line entry point is `src/cli.ts`.
  */
 import { spawnSync } from "node:child_process";
@@ -154,7 +155,9 @@ export function fileKind(path: string): FileKind {
 }
 
 /**
- * Path rules for `riskScore`, product-agnostic: where a defect costs most in most repositories.
+ * Path rules for `riskScore`. These are defaults taken from the first consumer (`ipc`, `preload`,
+ * `main`, `apps/<name>/src`) and are the owner's to tune; per-repository configuration is planned
+ * (https://github.com/niway-dev/agent-review/issues/5).
  * The highest matching weight wins. A test or a document scores its kind's weight whatever its
  * path, so `ipc/foo.test.ts` does not outrank the IPC code it tests.
  */

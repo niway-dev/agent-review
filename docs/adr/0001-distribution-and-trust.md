@@ -1,8 +1,11 @@
 # ADR 0001: Distribution and trust
 
-- **Status:** accepted as the direction. **Implementation pending:** the reusable workflow and the
-  tags are not built yet. The command-line contract and the provider adapter boundary are in
-  place (`docs/cli.md`); the copy-the-files template is the only install today.
+- **Status:** accepted as the direction. **Partly implemented:** the reusable workflow exists and
+  has run live in two consumers' runs; tags exist and release automation (release-please) is set
+  up. The command-line contract and the provider adapter boundary are in place (`docs/cli.md`);
+  the copy-the-files template remains supported. **Still unbuilt:** the policy-versioning
+  mechanism of decision 4. Severity rules live in `src/engine.ts`, and the only consumer input is
+  the focus file.
 - **Date:** 2026-10-25
 
 ## Context
@@ -39,7 +42,8 @@ on it being one.
    tag never changes what reviews ask for.
 5. **No `pull_request_target`.** It would give fork pull requests secrets, which is the usual
    route to running untrusted code with a key. Review triggers stay `pull_request` plus the
-   operator's `@claude` comment.
+   operator's `@claude` comment. (Update: the default mention is now `@agent-review`, with
+   `@claude` kept as an alias.)
 6. **Fork and untrusted pull requests are excluded.** The tool is meant for repositories where
    everyone who can push is trusted. That boundary is a documented assumption, not a feature the
    engine enforces against a person who can edit the workflow. The consequence is that the

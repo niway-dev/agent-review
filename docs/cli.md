@@ -38,13 +38,17 @@ equals sign: `-c <path>` did not replace the working directory's config in Bun 1
 
 - `review`: one review (event `COMMENT`, never an approval or a change request) whose first line
   says whether coverage is complete or partial, with a "Coverage by batch" table and a footer
-  `<sub>{model label} · {n} batches · ${cost}</sub>`. The footer names the provider and model, for
+  `<sub>{model label} · {n} batches · ${cost}</sub>`; the `· {n} batches` part appears only when
+  the review ran more than one batch. The footer names the provider and model, for
   example "Claude Sonnet 5.5 via Claude Code 2.1.304". A complete, unscoped review ends with
   `<!-- agent-review sha=<head> -->`; the next review starts from that commit. The older
   `<!-- claude-review sha=… -->` marker is still read, never written.
 - `review` when nothing changed: a short review body saying so ("Already reviewed", "Nothing to
   review").
-- `comment` with a question: one pull request comment holding the answer and the same footer.
+- `comment` with a question: one pull request comment holding the answer and a footer with the
+  model label and cost (no batch count, since an answer is one call). The `answer` path has
+  limits: it puts the whole diff in one call (no batching), reads only the first 100 review
+  threads of the pull request, and at most 30 comments per thread.
 - With `AGENT_REVIEW_DRY_RUN=1` it reads GitHub but prints instead of posting. It still calls the
   agent, so it costs money.
 
@@ -70,13 +74,17 @@ Settings, all optional:
 | `AGENT_REVIEW_ANSWER_BUDGET_USD` | `1` | Cap for one question answered by `comment` |
 | `AGENT_REVIEW_BATCH_LINES` | `1000` | Changed lines per batch |
 | `AGENT_REVIEW_BATCH_CHARS` | `140000` | Characters of diff per batch (about 40k tokens at 3.5 characters a token) |
-| `AGENT_REVIEW_DRY_RUN` | unset | `1`: read GitHub, print the review instead of posting |
+| `AGENT_REVIEW_DRY_RUN` | unset | `1`: read GitHub, print the review instead of posting. The reusable workflow has no input for it; it works only in the copy-the-files install |
 | `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` | The reviewer model, passed to the provider |
 | `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent. `claude-code` is the only accepted value; any other is a usage error that lists the accepted ones |
 | `AGENT_REVIEW_MENTION` | `@agent-review` | The keyword `comment` looks for. `@claude` always works as an alias |
 | `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. `comment` requires it: empty, `your-github-login` and anything starting with `EDIT` are refused. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
-| `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files |
+| `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files. The reusable workflow has no input for it; it works only in the copy-the-files install |
 | `AGENT_REVIEW_COMMENT_AUTHOR` | unset | `comment` only: the comment author's login. A different author than `AGENT_REVIEW_OPERATOR` makes `comment` do nothing and exit 0 |
+
+The defaults in `src/config.ts` and the defaults of the reusable workflow's inputs (see
+[install.md](install.md)) are kept in sync by hand; change both together. CI pins Bun
+separately (in `.github/workflows/ci.yml`) from the workflow's `bun_version` input.
 
 Budgets and sizes must be positive numbers; batch lines and chars, positive integers. Anything
 else is a usage error.

@@ -201,7 +201,7 @@ and the assumption that everyone who can push is trusted is what holds it togeth
 | `name` | The value of `AGENT_REVIEW_PROVIDER` that selects it |
 | `preflight()` | Throws before any call is paid for when the binary, settings or credential is missing |
 | `modelLabel()` | Text for the review footer |
-| `leaksSecret(texts)` | True when any text holds a credential of this provider; the engine refuses to post it |
+| `leaksSecret(texts)` | True when any text holds a credential of this provider; the engine throws and posts nothing |
 | `run(request)` | One call to completion: returns structured output or text, cost, turns, duration and a terminal reason (`success`, `budget`, `error`); throws when there is no result at all |
 
 The request carries the prompt, the working directory, extra readable directories, neutral tool
