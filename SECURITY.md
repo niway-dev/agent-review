@@ -31,7 +31,7 @@ The tool is safe to use only under these assumptions:
   `--tools Read,Glob,Grep` and the adapter's own settings file (which denies `Bash` and `/proc`
   reads; see [docs/providers/claude-code.md](docs/providers/claude-code.md)). It has no shell,
   starts no MCP server, ignores the user, project and local settings of the branch under review, and gets no GitHub token in its environment. Each call has a spend cap.
-- **The CLI holds the credentials.** It posts the review and refuses to post text that contains
+- **The CLI holds the credentials.** It posts the review and posts nothing at all (it stops with an error) if any text it would post contains
   the API key, either the job's exact key or anything shaped like one. An encoded key would pass
   that check.
 - **Only trusted people can start a run on demand.** Only the operator's `@agent-review` comment (or its `@claude` alias) starts

@@ -54,7 +54,7 @@ export interface ProviderAdapter {
   modelLabel(): string;
   /**
    * True when any text contains a credential of this provider (the exact key in the environment
-   * or anything shaped like one). The engine refuses to post such text.
+   * or anything shaped like one). The engine throws and posts nothing.
    */
   leaksSecret(texts: string[]): boolean;
   /** Runs one call to completion. Throws when the call produced no result at all. */

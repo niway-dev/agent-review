@@ -1,6 +1,7 @@
 name: Agent review
 # Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
-# `v1` floats to compatible fixes; to freeze, replace it with a full commit SHA of this repository.
+# `v1` floats to compatible fixes. To freeze, replace it with a full commit SHA of niway-dev/agent-review
+# (not a commit of your own repository). A tag, even a pre-release, can be moved by an admin; only a SHA is a pin.
 # First install: the installing pull request gets only the automatic review. `@agent-review review`
 # and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
 on:

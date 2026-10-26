@@ -53,6 +53,10 @@ The reusable workflow takes these `with:` inputs. Only `operator` is required.
 | `bun_version` | `1.3.4` | Pinned Bun version |
 | `skip_branch_prefixes` | `release-please--` | Comma-separated head branch prefixes that are not reviewed |
 
+Input defaults are kept in sync by hand with the defaults in `src/config.ts`. CI pins Bun
+separately from the `bun_version` input. `AGENT_REVIEW_EXCLUDE` and `AGENT_REVIEW_DRY_RUN` have no
+input here; they exist only in the copy-the-files install.
+
 ## Checks before enabling
 
 - The secret `ANTHROPIC_API_KEY` exists in the repository (or the organisation, shared with it).

@@ -16,7 +16,7 @@ your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status
 
-**Release candidate: `v1.0.0-rc.2` is tagged and passed a live run in a consumer, across owners. Release-please will cut `v1.0.0` from Conventional Commits once the owner creates its secrets** (see
+**Release candidate: `v1.0.0-rc.2` is tagged and passed a live run in a consumer, across owners. Release-please is set up and will cut `v1.0.0` from Conventional Commits when its release pull request is merged** (see
 [docs/releasing.md](docs/releasing.md)). The command-line contract is done: one
 CLI (`src/cli.ts`, with a `bin` entry) and a provider adapter boundary, documented in
 [docs/cli.md](docs/cli.md) and [docs/providers/claude-code.md](docs/providers/claude-code.md).
@@ -59,7 +59,8 @@ secret and set your login as `operator`:
 ```yaml
 name: Agent review
 # Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
-# `v1` floats to compatible fixes; to freeze, replace it with a full commit SHA of this repository.
+# `v1` floats to compatible fixes. To freeze, replace it with a full commit SHA of niway-dev/agent-review
+# (not a commit of your own repository). A tag, even a pre-release, can be moved by an admin; only a SHA is a pin.
 # First install: the installing pull request gets only the automatic review. `@agent-review review`
 # and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
 on:
@@ -83,7 +84,7 @@ Full steps, settings and updates: [docs/install.md](docs/install.md). Maintainer
 The agent can only read: Claude Code runs with `--restricted`, `--strict-mcp-config` and
 `--tools Read,Glob,Grep`, so it has no shell and no MCP servers, ignores the reviewed branch's own
 `.claude/` settings and hooks, and receives no GitHub token. The script, not the agent, holds the
-tokens, posts the review, and refuses to post text containing your API key.
+tokens, posts the review, and throws, posting nothing at all, if any text it would post contains your API key.
 
 This is not a sandbox. You must trust everyone who can push to a repository that runs it, because
 the workflow holds your key and a pull request can edit workflow files. Fork pull requests are

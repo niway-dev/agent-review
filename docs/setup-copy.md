@@ -137,7 +137,7 @@ and the adapter's `--settings` file: no shell, no MCP servers, the head's user, 
 `.claude/` hooks included) ignored, no GitHub token in its environment, `/proc` denied to every
 read tool (unverified under `--restricted`), and `--max-budget-usd` per call. Whether the head's
 `CLAUDE.md` still loads as memory under `--restricted` is unverified. The CLI holds the tokens, posts the
-review, and refuses to post text containing the key. On a public repository, only replies by
+review, and posts nothing at all if any text it would post contains the key. On a public repository, only replies by
 `OWNER`, `MEMBER` or `COLLABORATOR` reach the agent, and only the operator's `@agent-review` (or `@claude`) starts a run.
 
 **This is not a sandbox.** Managed settings still apply, and an encoded key would pass the output
