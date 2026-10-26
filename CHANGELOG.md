@@ -12,6 +12,11 @@ release-please inserts each new release above the first version heading it finds
   exact `vX.Y.Z` tag and a GitHub Release, bumps `package.json` and updates this file, then moves
   the floating `v1` tag. See `docs/releasing.md`.
 
+### Documentation
+
+- `docs/architecture.md` (how the engine and the workflow fit together and what a change must keep) and ADR 0002 (TypeScript on Bun, no runtime dependencies).
+- `docs/install.md` and `docs/releasing.md` reflect the first tags (`v1.0.0-rc.1` and the floating `v1`).
+
 ### Security
 
 - The reusable workflow checks the reviewed head out into `head/` and the engine into a sibling

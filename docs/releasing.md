@@ -10,6 +10,10 @@ Both `main` and the `v*` tags are protected by repository rulesets. `main` requi
 requests, so every change, including a release, lands through one. Tags `v*` cannot be moved or
 deleted except through a repository admin bypass; the alias step below needs that bypass.
 
+Current state: the exact tags `v1.0.0-rc.1` and `v1.0.0-rc.2` exist (rc.2 is at `2646cdd` and passed
+a live run in a consumer). `v1` still points at rc.1 until the owner moves it or release-please
+does; `v1.0.0` has not been cut yet.
+
 ## How a release happens
 
 1. Changes land on `main` with Conventional Commit titles (see README, "Commit messages").
@@ -86,7 +90,7 @@ no maintenance branch: if one is ever needed, add a second release-please config
 
 ## First release: `1.0.0`
 
-`1.0.0-rc.1` already exists as a tag (and `v1` currently points at it). The config sets
+The tags `v1.0.0-rc.1` and `v1.0.0-rc.2` already exist (and `v1` currently points at rc.1). The config sets
 `"release-as": "1.0.0"` and the manifest says `1.0.0-rc.1`, so the first release pull request is
 `chore: release 1.0.0`, built from the commits after the `v1.0.0-rc.1` tag. Merging it creates
 `v1.0.0` and moves `v1`. The rc tags stay as history and are never deleted.
@@ -95,7 +99,7 @@ After that release, remove `"release-as"` from `release-please-config.json` in a
 request (`ci: drop release-as after 1.0.0`); otherwise every later release would try to be
 `1.0.0`.
 
-The hand-written sections of `CHANGELOG.md` (everything up to `1.0.0-rc.1`) stay as history;
+The hand-written sections of `CHANGELOG.md` (everything under `1.0.0-rc.2` and below) stay as history;
 release-please writes each new section above the first version heading, which is why the former
 "Unreleased" heading is now `1.0.0-rc.2`.
 
