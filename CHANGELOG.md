@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Workflows: `actions/checkout` and `oven-sh/setup-bun` are pinned by full commit SHA with the
+  version in a trailing comment (also in `templates/caller-workflow.yml`); the actionlint image
+  in CI is pinned by digest. Dependabot (`.github/dependabot.yml`) updates the action pins weekly.
+- Claude Code install: the reusable workflow and the copy template no longer pipe
+  `claude.ai/install.sh` into a shell. `src/install-claude-code.sh` downloads the pinned version
+  and fails unless its SHA-256 matches the publisher's manifest. New optional input
+  `claude_code_sha256` pins the hash independently. Default `claude_code_version` stays 2.1.304.
+- Docs: how the binary is verified (`docs/providers/claude-code.md`), ruleset protection of
+  `main` and `v*` tags (`docs/releasing.md`), supply-chain note (`SECURITY.md`).
+
 ## 1.0.0-rc.1 (2026-10-25)
 
 Initial import of the review engine from a private kit. First release candidate.

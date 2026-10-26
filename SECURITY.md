@@ -30,6 +30,11 @@ The tool is safe to use only under these assumptions:
 - **Only trusted people can start a run on demand.** Only the operator's `@agent-review` comment (or its `@claude` alias) starts
   an on-demand run, and only replies from `OWNER`, `MEMBER` or `COLLABORATOR` reach the agent.
 
+- **Supply chain.** Third-party actions in this repository's workflows are pinned by full commit
+  SHA and updated by Dependabot. The Claude Code binary is downloaded at a pinned version and
+  checked against a SHA-256 before it is installed; a consumer can pin that hash itself
+  (see [docs/providers/claude-code.md](docs/providers/claude-code.md)).
+
 This is not a sandbox. Managed Claude Code settings on the runner still apply.
 
 ## What is unverified
