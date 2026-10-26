@@ -104,6 +104,34 @@ Installed copies can migrate one variable at a time. The new name wins when both
 
 A YAML configuration file is not implemented.
 
+### Finding labels
+
+Every finding is labelled on two axes, each an emoji followed by its word, for example
+`🟠📝 **Fix · docs: stale 'Read by' cell**`. The decision is
+[ADR 0003](adr/0003-two-axis-finding-labels.md).
+
+| Severity | Emoji | For the author | Where it is posted |
+| --- | --- | --- | --- |
+| `blocker` | 🔴 Blocker | Fix before merging: the reviewer can name the input, state or trust boundary that fails | Inline, or "Outside the diff" |
+| `fix` | 🟠 Fix | Wrong today; fix it in this pull request; does not block the merge | Inline, or "Outside the diff" |
+| `consider` | 🟡 Consider | Would be better; the author may decline | Inline, or "Outside the diff" |
+| `info` | ⚪ Info | Nothing to change; awareness only | Always the body, under "For your information" |
+
+| Topic | Emoji | Covers |
+| --- | --- | --- |
+| `bug` | 🐛 | The code does the wrong thing for some input or state |
+| `security` | 🔐 | Credentials, user data, or a trust boundary the change weakens |
+| `rules` | 📜 | A violation of `CLAUDE.md`, `AGENTS.md` or a repository convention |
+| `adr` | 🏛️ | A change that contradicts a decision record, or (engine notice) one that edits a file under `docs/adr/` |
+| `docs` | 📝 | Documentation or comments that are stale or contradict the code |
+| `tests` | 🧪 | Missing coverage, or a test that does not test what its name says |
+| `perf` | ⚡ | Cost, latency, repeated work, N+1 queries |
+| `cleanup` | 🧹 | Duplication, dead code, a misleading name |
+| `question` | ❓ | Something the reviewer could not determine and asks the author |
+
+A repository's focus file (`.github/agent-review.md`) may say what to look for, but it may not add
+severities or topics: a label means the same thing in every repository that runs the reviewer.
+
 ## Exit codes
 
 | Code | Meaning |

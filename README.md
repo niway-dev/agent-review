@@ -3,8 +3,10 @@
 Advisory pull request reviews by an agent CLI, run inside your own GitHub Actions with your own
 API key.
 
-Each finding arrives as an inline review comment on its line, labelled "Should fix" or "Note",
-and you can answer it in its thread. The review never approves, requests changes or blocks a
+Each finding arrives as an inline review comment on its line, labelled with a severity (when to
+act: Blocker, Fix, Consider) and a topic (what it is about: bug, docs, security…), for example
+`🟠📝 Fix · docs`, and you can answer it in its thread. Information that asks for no reply, such as
+a notice that the pull request edits a decision record, goes in the review body instead. The review never approves, requests changes or blocks a
 merge. For a large pull request the files are grouped into batches ordered by a risk score
 computed from their paths, riskiest first, and each batch is one agent call with a spend cap, so
 money bounds the run rather than pull request size. If some files are not reviewed, the first

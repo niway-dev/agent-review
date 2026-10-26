@@ -86,8 +86,8 @@ describe("the batch loop against a fake provider", () => {
             {
               path: MANAGER,
               line: 2,
-              severity: "should_fix",
-              category: "correctness",
+              severity: "fix",
+              topic: "bug",
               title: "Off by one",
               body: "Fails for an empty list.",
             },
@@ -144,7 +144,7 @@ describe("the batch loop against a fake provider", () => {
     expect(body).toContain("reviewed 3 of 4 files");
     expect(body).toContain(`\`${LOGO}\` (binary)`);
     expect(body).not.toContain("agent-review sha=");
-    expect(body).toContain("1 finding(s), 1 to fix; 1 on their lines");
+    expect(body).toContain("1 finding(s): 1 to fix; 1 on their lines");
     expect(body).toContain("| Batch 1 of 2 | 3 | 9 | 5 | reviewed after a retry | 6 | $0.40 |");
     expect(body).toContain("| Batch 2 of 2 | 1 | 4 | 1 | reviewed | 3 | $0.20 |");
     expect(body).toContain("**Batch 1 of 2.** Manager looks mostly fine.");
@@ -197,6 +197,54 @@ describe("the batch loop against a fake provider", () => {
     };
     expect(() => review(deps, "o/r", 7, [])).toThrow("credential");
     expect(posted.review).toBeUndefined();
+  });
+});
+
+describe("the ADR notice", () => {
+  const ADR = "docs/adr/0003-two-axis-finding-labels.md";
+  const withAdr = [...prFiles, { filename: ADR, additions: 2, deletions: 0, patch: "@@ -1,1 +1,2 @@\n x\n+y" }];
+  const run = (words: string[], findings: ReviewOutput["findings"], exclude?: string) => {
+    const posted: { review?: { body: string; comments: unknown[] } } = {};
+    const gh = fakeGh(posted);
+    const provider = new FakeProvider([
+      () => ({
+        structuredOutput: out({
+          files_reviewed: [MANAGER, STORE, GUIDE, LOGO, ADR],
+          findings,
+          summary: "ok",
+        }),
+      }),
+    ]);
+    const deps: Deps = {
+      gh: (args, input) =>
+        args.join(" ").includes("/pulls/7/files")
+          ? withAdr.map((f) => JSON.stringify(f)).join("\n")
+          : gh(args, input),
+      provider,
+      config: loadConfig(exclude ? { AGENT_REVIEW_EXCLUDE: exclude } : {}),
+      log: () => {},
+      warn: () => {},
+    };
+    review(deps, "o/r", 7, words);
+    return posted.review;
+  };
+
+  test("goes in the body once, collapsed with the model's own, and opens no thread", () => {
+    const posted = run(
+      [],
+      [{ path: ADR, line: 0, severity: "info", topic: "adr", title: "ADR edited", body: "Model says so." }],
+    );
+    const body = posted?.body ?? "";
+    expect(posted?.comments).toEqual([]);
+    expect(body).toContain("### For your information");
+    expect(body).toContain(`⚪🏛️ **Info · adr: Edits an accepted decision record** (\`${ADR}\`)`);
+    expect(body).not.toContain("ADR edited");
+    expect(body).toContain("1 finding(s); 0 on their lines");
+  });
+
+  test("is not added for a decision record outside the requested paths or excluded", () => {
+    expect(run([MANAGER], [])?.body).not.toContain("For your information");
+    expect(run([], [], "docs/adr/**")?.body).not.toContain("For your information");
   });
 });
 

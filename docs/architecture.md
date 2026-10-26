@@ -69,8 +69,9 @@ All names are in `src/engine.ts` unless a file is given.
 4. **Prompt assembly.** `buildBatchPrompt` writes, in order: the pull request and commit, the
    instruction to read `CLAUDE.md` and the ADRs first, the full file list for orientation, the
    batch's own file list, the line-number convention, the review instruction, the thread
-   instruction when open threads exist, the severity rules (`RULES`: "should fix" only for a
-   correctness bug or a security problem, everything else a "note"), the repository's focus file
+   instruction when open threads exist, the label rules (`RULES`: each severity with the test a
+   finding must pass, each topic, the combination rules, and the instruction not to report that a
+   decision record is edited, since the engine does that), the repository's focus file
    (`repoFocus`, `.github/agent-review.md`) and last the diff. `annotateDiff` prefixes each diff
    line with its line number in the file at the head, so a finding's `line` is one GitHub can anchor
    a thread to. The prompt goes to the provider through stdin because a large diff would exceed
@@ -102,10 +103,17 @@ All names are in `src/engine.ts` unless a file is given.
    so. *Why:* money, not pull request size, bounds the run, and an unknown cost is assumed to be
    the worst case.
 
-8. **Merge and posting.** `mergeOutputs` joins the batches: it keeps one finding per
-   path, line and category (the "should fix" wins), merges skips, and treats a file reviewed in a
-   retry as reviewed. `buildReview` turns findings on commentable lines (`commentableLines`: added
-   and context lines of the patch) into inline comments and puts the rest under "Outside the diff".
+8. **Merge and posting.** `mergeOutputs` joins the batches: `dedupeFindings` keeps one finding
+   per path, line and topic (the higher severity wins, blocker > fix > consider > info), it merges
+   skips, and treats a file reviewed in a retry as reviewed. `adrNotices` then adds one
+   `⚪🏛️ Info · adr` finding for every reviewed file under a `docs/adr/` directory, deduplicated with
+   the model's findings the same way. `buildReview` labels each finding with `label` (two emojis,
+   then severity, topic and title in words, from the `SEVERITY` and `TOPIC` tables, the only place
+   the emojis live), turns findings on commentable lines (`commentableLines`: added and context
+   lines of the patch) into inline comments, puts the rest under "Outside the diff", and puts every
+   `info` finding under "For your information", never inline, because information needs no reply.
+   The count line (`countLine`) reads "N finding(s): B blocker(s), F to fix, C to consider" and
+   omits empty groups.
    It writes a first line saying whether coverage is complete or partial, the summary, a "Coverage
    by batch" table, a footer with the model label, batch count and cost, and, only for a complete,
    unscoped review, the marker for the next incremental run. The body is kept under
@@ -239,7 +247,8 @@ deprecated `CLAUDE_REVIEW_X` with a notice. Full descriptions are in [cli.md](cl
 | `AGENT_REVIEW_DRY_RUN` | off | `src/config.ts`; no workflow input |
 | `AGENT_REVIEW_COMMENT_AUTHOR` | none | read in `src/cli.ts`; set by the `on-demand` job |
 
-The built-in exclude list (`DEFAULT_EXCLUDE`), risk rules (`RISK_RULES`), severity rules (`RULES`),
+The built-in exclude list (`DEFAULT_EXCLUDE`), risk rules (`RISK_RULES`), label rules (`RULES`,
+`SEVERITY`, `TOPIC`),
 the output schema (`SCHEMA`) and `MIN_BATCH_USD` are constants in `src/engine.ts`, not settings.
 When the engine runs through the reusable workflow, the workflow always passes its inputs, so the
 workflow defaults are the ones consumers get; the `src/config.ts` defaults apply to direct CLI use
