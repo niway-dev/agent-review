@@ -1,6 +1,6 @@
 # ADR 0003: Finding labels have two axes, severity and topic
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-10-26
 - **Spec:** `docs/specs/2026-10-26-finding-labels.md`
 

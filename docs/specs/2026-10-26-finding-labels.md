@@ -1,6 +1,6 @@
 # Finding labels: severity and topic on two axes
 
-- **Status:** draft, awaiting owner review
+- **Status:** accepted 2026-10-26; implemented in the same change
 - **Date:** 2026-10-26
 - **Creates:** ADR 0003 (two-axis finding labels)
 
@@ -56,7 +56,7 @@ Examples, as they would appear as the first line of an inline comment:
 And in the review body, where `Info` always goes:
 
 ```
-⚪🏛️ Info · adr: this pull request edits docs/adr/0001-distribution-and-trust.md
+- ⚪🏛️ Info · adr: Edits an accepted decision record (`docs/adr/0001-distribution-and-trust.md`): This pull request edits an accepted decision record. If the change supersedes a decision, say so in the record.
 ```
 
 ### Severity: when the author acts
