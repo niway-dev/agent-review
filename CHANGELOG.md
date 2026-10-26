@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Documentation
+
+- `docs/architecture.md` (how the engine and the workflow fit together and what a change must keep) and ADR 0002 (TypeScript on Bun, no runtime dependencies).
+
 ### Security
 
 - The reusable workflow checks the reviewed head out into `head/` and the engine into a sibling

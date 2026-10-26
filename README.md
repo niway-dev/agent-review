@@ -90,7 +90,8 @@ unverified: [SECURITY.md](SECURITY.md).
 
 ## Design
 
-[ADR 0001: distribution and trust](docs/adr/0001-distribution-and-trust.md)
+[ADR 0001: distribution and trust](docs/adr/0001-distribution-and-trust.md); [ADR 0002: TypeScript on Bun, no runtime dependencies](docs/adr/0002-typescript-on-bun-zero-dependencies.md).
+How the pieces fit together: [docs/architecture.md](docs/architecture.md).
 
 ## License
 
