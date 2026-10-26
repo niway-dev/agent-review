@@ -1,0 +1,78 @@
+name: Release Please
+
+# Maintains one release PR (version bump in package.json + CHANGELOG.md) from Conventional
+# Commits on main. Merging it creates the exact tag vX.Y.Z and a GitHub Release. Then the
+# last step moves the floating major tag (v1) to the release commit.
+# It only cuts releases: it publishes nothing to npm (deferred, see docs/releasing.md).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  # Never cancel a half-finished release cut; queue instead.
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        id: rp
+        with:
+          # A PAT lets the release PR trigger CI (GITHUB_TOKEN events do not start workflows).
+          # Falls back to GITHUB_TOKEN so the release PR still opens before the secret exists,
+          # but without CI running on it.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Moves the floating major tag (v1) to the release commit. The `v*` tag ruleset forbids
+      # updates except by repository admins, so GITHUB_TOKEN cannot do it: RELEASE_TAG_TOKEN is
+      # a fine-grained PAT of an admin. Without it, or if the push fails, the step only warns and
+      # prints the commands, so the release itself never fails because of the alias.
+      # Pre-releases (tag with a hyphen, such as v1.0.0-rc.2) never move the alias.
+      - name: Move the floating major tag
+        if: ${{ steps.rp.outputs.release_created == 'true' && !contains(steps.rp.outputs.tag_name, '-') }}
+        env:
+          TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
+          REPO: ${{ github.repository }}
+          MAJOR_TAG: v${{ steps.rp.outputs.major }}
+          RELEASE_TAG: ${{ steps.rp.outputs.tag_name }}
+          RELEASE_SHA: ${{ steps.rp.outputs.sha }}
+        run: |
+          set -uo pipefail
+          manual="git tag -f ${MAJOR_TAG} ${RELEASE_SHA} && git push -f origin ${MAJOR_TAG}"
+          warn() {
+            echo "::warning title=Floating tag ${MAJOR_TAG} not moved::$1"
+            {
+              echo "### Floating tag \`${MAJOR_TAG}\` was NOT moved"
+              echo "$1"
+              echo
+              echo "Run as a repository admin:"
+              echo '```sh'
+              echo "$manual"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [ -z "${TAG_TOKEN}" ]; then
+            warn "The secret RELEASE_TAG_TOKEN is not set, so ${RELEASE_TAG} was released but the alias stayed where it was."
+            exit 0
+          fi
+          git init -q alias && cd alias
+          git remote add origin "https://x-access-token:${TAG_TOKEN}@github.com/${REPO}.git"
+          if git fetch -q --depth=1 origin "${RELEASE_SHA}" \
+            && git -c advice.detachedHead=false checkout -q "${RELEASE_SHA}" \
+            && git tag -f "${MAJOR_TAG}" "${RELEASE_SHA}" \
+            && git push -f origin "refs/tags/${MAJOR_TAG}"; then
+            echo "${MAJOR_TAG} now points to ${RELEASE_SHA} (${RELEASE_TAG})" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            warn "Pushing ${MAJOR_TAG} failed (token expired, missing contents: write, or the account is not a ruleset bypass actor)."
+          fi

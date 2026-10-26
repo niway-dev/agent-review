@@ -3,49 +3,108 @@
 For the maintainer. Consumers call `review.yml@v1`, so a tag is a trust decision: whoever
 controls it controls code that runs with the consumers' API key.
 
-Both are protected by repository rulesets. `main` requires pull requests, so every change,
-including a release, lands through one. Tags `v*` cannot be moved or deleted except through a
-repository admin bypass; that bypass is how the release process moves `v1` (see below). Creating
-a new exact tag is not blocked.
+Releases are automated with [release-please](https://github.com/googleapis/release-please). Your
+job is to merge the release pull request. Nothing is published to npm; that stays deferred.
 
-No tags exist yet; cutting them is not part of the ticket that added this file.
+Both `main` and the `v*` tags are protected by repository rulesets. `main` requires pull
+requests, so every change, including a release, lands through one. Tags `v*` cannot be moved or
+deleted except through a repository admin bypass; the alias step below needs that bypass.
+
+Current state: the exact tags `v1.0.0-rc.1` and `v1.0.0-rc.2` exist (rc.2 is at `2646cdd` and passed
+a live run in a consumer). `v1` still points at rc.1 until the owner moves it or release-please
+does; `v1.0.0` has not been cut yet.
+
+## How a release happens
+
+1. Changes land on `main` with Conventional Commit titles (see README, "Commit messages").
+2. On every push to `main`, `.github/workflows/release-please.yml` opens or updates one pull
+   request titled `chore: release X.Y.Z`. It bumps `package.json` and adds a section to
+   `CHANGELOG.md` from the commits since the last release. `feat:` is a minor bump, `fix:` and
+   `perf:` a patch, `feat!:` or a `BREAKING CHANGE:` footer a major one.
+3. You review the notes and merge that pull request.
+4. On the merge, release-please creates the exact tag `vX.Y.Z` (immutable) and a GitHub Release
+   with the same notes.
+5. The last workflow step moves the floating major tag (`v1`) to the release commit.
+
+Configuration: `release-please-config.json` and `.release-please-manifest.json`.
+
+## The alias step
+
+After a stable release of `1.x.y` the workflow runs, with `RELEASE_TAG_TOKEN`:
+
+```sh
+git tag -f v1 <release-sha>
+git push -f origin v1
+```
+
+It skips pre-releases (a tag containing `-`). Consumers who pin `@v1` get the new release; the
+exact tag `v1.x.y` and the SHA never move. If the secret is missing, or the push fails, the step
+does not fail the run: it prints a warning and the two commands above in the run summary. Run
+them as a repository admin. This is also the only manual tag instruction left.
+
+## Secrets (repository secrets, created by the owner)
+
+| Secret | Used for | Without it |
+| --- | --- | --- |
+| `RELEASE_PLEASE_TOKEN` | Opens the release PR and creates the tag and Release, so that CI runs on the release PR (events made with `GITHUB_TOKEN` do not start workflows) | Falls back to `GITHUB_TOKEN`: the release PR still opens, but CI does not run on it, so close and reopen it, or push to it, to start checks |
+| `RELEASE_TAG_TOKEN` | Moves the `v1` tag, which the ruleset reserves for admins | The alias step only warns; move `v1` by hand |
+
+Both can hold the same token. Create a fine-grained personal access token owned by a repository
+admin (who is a bypass actor of the `v*` tag ruleset), with:
+
+- Resource owner and repository access: only `niway-dev/agent-review`.
+- Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**
+  (**Metadata: Read** is added automatically).
+- A short expiry; put the renewal date in your calendar. An expired token shows up as the alias
+  warning, not as a failed release.
+
+Settings, Secrets and variables, Actions, "New repository secret".
 
 ## Rules
 
 - `v1` moves only for backward-compatible releases: bug fixes and additions that keep every
-  input, secret and behaviour of `v1.x` working.
+  input, secret and behaviour of `v1.x` working. A breaking change is `feat!:` and makes the
+  next release `2.0.0`, which does not move `v1`; the alias step then creates and moves `v2`.
 - A policy change (what reviews ask for, default budgets that change cost, trigger or permission
   changes) never rides a tag move. Ship it under a new major version, or as a pull request to
   each consumer.
-- Exact tags (`v1.0.0`, `v1.0.0-rc.1`) and commit SHAs never move.
-- Tags are annotated, on a commit of `main` whose CI passed.
+- Exact tags (`v1.0.0`) and commit SHAs never move.
+- Never create or edit `v*.*.*` tags by hand: release-please owns them.
 
-## Release candidate
+## Pinning: `@v1` versus a SHA
 
-```sh
-git checkout main && git pull
-git tag -a v1.0.0-rc.1 -m "v1.0.0-rc.1" <sha>
-git push origin v1.0.0-rc.1
-```
+- `@v1` follows every compatible release. Consumers use it to receive fixes without editing.
+- `@v1.2.3` is immutable and readable.
+- `@<40-character-sha>` is the strongest pin and what to use when freezing. The engine is checked
+  out at the same commit as the workflow. To find a release's SHA: `git rev-parse v1.2.3^{commit}`.
 
-Use the next `rc.N` for each further candidate. A consumer tests a candidate by pinning
-`@v1.0.0-rc.N` in its caller file.
+## Hotfix
 
-## Final release and the floating tag
+1. Branch from `main`, fix, and open a pull request titled `fix: ...`.
+2. Merge it. The release pull request updates itself to the next patch version.
+3. Merge the release pull request. `v1` moves to the fix.
 
-```sh
-git tag -a v1.0.0 -m "v1.0.0" <sha>
-git push origin v1.0.0
-git tag -fa v1 -m "v1" <sha>
-git push -f origin v1
-```
+If `main` has unreleased work that must not ship yet, hold the release PR unmerged only if the
+other changes are already acceptable to ship, because it contains everything on `main`. There is
+no maintenance branch: if one is ever needed, add a second release-please configuration for it.
 
-`git tag -f v1 <sha>` followed by `git push -f origin v1` is the move. The tag stays annotated
-if you pass `-a`. For a later `v1.x.y`, create the exact tag first, then move `v1` to the same
-commit.
+## First release: `1.0.0`
 
-## Before each release
+The tags `v1.0.0-rc.1` and `v1.0.0-rc.2` already exist (and `v1` currently points at rc.1). The config sets
+`"release-as": "1.0.0"` and the manifest says `1.0.0-rc.1`, so the first release pull request is
+`chore: release 1.0.0`, built from the commits after the `v1.0.0-rc.1` tag. Merging it creates
+`v1.0.0` and moves `v1`. The rc tags stay as history and are never deleted.
 
-1. Move the CHANGELOG "Unreleased" entries under the new version.
-2. Confirm the release is backward compatible; if not, it is `v2`.
-3. Check that the caller template in `templates/` still matches the workflow's inputs.
+After that release, remove `"release-as"` from `release-please-config.json` in a normal pull
+request (`ci: drop release-as after 1.0.0`); otherwise every later release would try to be
+`1.0.0`.
+
+The hand-written sections of `CHANGELOG.md` (everything under `1.0.0-rc.2` and below) stay as history;
+release-please writes each new section above the first version heading, which is why the former
+"Unreleased" heading is now `1.0.0-rc.2`.
+
+## Before merging a release pull request
+
+1. Confirm the release is backward compatible; if not, it is `2.0.0`.
+2. Check that the caller template in `templates/` still matches the workflow's inputs.
+3. Check that CI is green on the release pull request.

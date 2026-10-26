@@ -111,6 +111,9 @@ Verified:
 - A prompt on stdin is accepted with `-p --restricted --strict-mcp-config --tools Read,Glob,Grep
   --output-format json`: a $0 local check with a fake key reached the API and ended in an
   `api_error` at cost 0.
+- The hardened invocation (`--restricted --strict-mcp-config --tools Read,Glob,Grep --settings`)
+  has run through the reusable workflow in a live review of a private repository: three batches,
+  all files reviewed, $0.19 in total, normal posting.
 - A live run of the batched engine (one batch, four files, four turns, about $0.07) reviewed every
   file and posted normally.
 

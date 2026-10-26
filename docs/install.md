@@ -1,7 +1,9 @@
 # Install with the reusable workflow
 
-Pre-release until `v1.0.0`: no tag exists yet, so `@v1` does not resolve today. Until it does,
-pin a full commit SHA of this repository in the caller file.
+Tags: `v1` floats and moves only for backward-compatible releases; exact tags such as `v1.0.0-rc.2`
+never move; pinning a full commit SHA is the strict option. Today `v1` still points at the
+release candidate `v1.0.0-rc.1` until the owner or release-please moves it. A SHA must be a commit
+of `niway-dev/agent-review`, not of your own repository (see "How updates arrive").
 
 Your repository keeps one short caller file. It owns the triggers, the secret it passes and the
 permission ceiling; the reusable workflow in this repository runs the engine.
@@ -65,17 +67,21 @@ The reusable workflow takes these `with:` inputs. Only `operator` is required.
   backward-compatible releases. Each run records the exact engine commit in its job summary.
 - **A policy change or a new major version** never rides a tag move. It arrives as a pull request
   to your repository (a new `@v2` in the caller, or a policy update you review).
-- **Pinning by SHA.** To freeze, replace `@v1` with a full commit SHA, for example
+- **Pinning by SHA.** To freeze, replace `@v1` with a full commit SHA *of this repository*
+  (`niway-dev/agent-review`, not of your own repository), for example
   `uses: niway-dev/agent-review/.github/workflows/review.yml@<40-character-sha>`. The engine is
   checked out at the same commit, so engine and workflow can never differ. You then update by
   editing the SHA.
 
 ## Private repositories
 
-- Calling a workflow across owners requires this repository to be public. That is the plan for
-  `v1.0.0`; while it is private, only repositories that are allowed to use it can call it.
+- Calling a workflow across owners requires this repository to be public, and it is. If it were
+  private, only repositories that are allowed to use it could call it.
 - Same organisation, private use: set this repository's Settings, Actions, General, Access to
   "Accessible from repositories in the organisation".
 - The workflow checks the engine out with the job's own token. A token for your repository
   cannot read another private repository, so a private engine repository is not expected to work
-  without extra setup. This is untested; ticket 1.9 verifies the live behaviour.
+  without extra setup.
+- Verified live: a private repository owned by a different user than this repository's
+  organisation called `@v1`, and the engine checkout resolved the tag across owners with the
+  job's own token.

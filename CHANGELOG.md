@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-rc.2 (hand-written, before release-please)
+
+This section and everything below it were written by hand. From the first release-please release
+(`1.0.0`) on, new sections are generated above it. Its heading is a version number on purpose:
+release-please inserts each new release above the first version heading it finds.
+
+### Release automation
+
+- Releases are cut by release-please from Conventional Commits: merging its release PR creates the
+  exact `vX.Y.Z` tag and a GitHub Release, bumps `package.json` and updates this file, then moves
+  the floating `v1` tag. See `docs/releasing.md`.
+
+### Documentation
+
+- `docs/architecture.md` (how the engine and the workflow fit together and what a change must keep) and ADR 0002 (TypeScript on Bun, no runtime dependencies).
+- `docs/install.md` and `docs/releasing.md` reflect the first tags (`v1.0.0-rc.1` and the floating `v1`).
 
 ### Security
 
