@@ -145,7 +145,7 @@ jobs:
       # `bunfig.toml` or `.env` from it.
       - name: Checkout the pull request head
         if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: head
@@ -160,7 +160,7 @@ jobs:
       # So the engine version always equals the version of this workflow that was called.
       - name: Checkout the engine at this workflow's version
         if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -264,7 +264,7 @@ jobs:
 
       # The head is data, as in the `review` job: it goes into `head/`.
       - name: Checkout the pull request head
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
           path: head
@@ -273,7 +273,7 @@ jobs:
 
       # See the `review` job for why this is `job.workflow_sha` and not `github.workflow_sha`.
       - name: Checkout the engine at this workflow's version
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
