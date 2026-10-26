@@ -96,20 +96,24 @@ jobs:
     steps:
       # The head, not the default merge commit, so the files match the diff's lines.
       - name: Checkout the pull request head
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.4
 
       - name: Install Claude Code
+        env:
+          CLAUDE_INSTALL_DIR: ${{ runner.temp }}/claude-bin
+          # Optional: pin the binary's SHA-256 yourself. Empty means the publisher's manifest.
+          CLAUDE_CODE_SHA256: ""
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash scripts/agent-review/install-claude-code.sh
+          echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Review the pull request
         env:
@@ -158,27 +162,31 @@ jobs:
       # Claude Code ignore the head's `.claude/` settings and hooks; that is not a sandbox,
       # and the trust assumption in the header still covers the rest.
       - name: Checkout the pull request head
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
           fetch-depth: 1
 
       - name: Checkout the default branch's CLI
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: .ci-main
           sparse-checkout: scripts/agent-review
           fetch-depth: 1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.4
 
       - name: Install Claude Code
+        env:
+          CLAUDE_INSTALL_DIR: ${{ runner.temp }}/claude-bin
+          # Optional: pin the binary's SHA-256 yourself. Empty means the publisher's manifest.
+          CLAUDE_CODE_SHA256: ""
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash .ci-main/scripts/agent-review/install-claude-code.sh
+          echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       # The comment reaches the CLI through the environment, never interpolated
       # into the shell, so its text cannot run as a command.

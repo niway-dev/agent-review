@@ -45,6 +45,7 @@ The reusable workflow takes these `with:` inputs. Only `operator` is required.
 | `model` | `claude-sonnet-5-5` | Model the agent uses |
 | `provider` | `claude-code` | Agent provider |
 | `claude_code_version` | `2.1.304` | Pinned Claude Code version |
+| `claude_code_sha256` | empty | Optional SHA-256 of the Claude Code binary for the runner platform; empty reads it from the publisher manifest (see [providers/claude-code.md](providers/claude-code.md)) |
 | `bun_version` | `1.3.4` | Pinned Bun version |
 | `skip_branch_prefixes` | `release-please--` | Comma-separated head branch prefixes that are not reviewed |
 

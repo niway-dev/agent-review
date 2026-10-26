@@ -1,8 +1,12 @@
 # Releasing
 
 For the maintainer. Consumers call `review.yml@v1`, so a tag is a trust decision: whoever
-controls it controls code that runs with the consumers' API key. Protect tags `v*` in the
-repository settings.
+controls it controls code that runs with the consumers' API key.
+
+Both are protected by repository rulesets. `main` requires pull requests, so every change,
+including a release, lands through one. Tags `v*` cannot be moved or deleted except through a
+repository admin bypass; that bypass is how the release process moves `v1` (see below). Creating
+a new exact tag is not blocked.
 
 No tags exist yet; cutting them is not part of the ticket that added this file.
 
