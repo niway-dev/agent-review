@@ -1,0 +1,3 @@
+# Hostile fixture: if Bun loaded this file from the reviewed head, preload.ts would run inside
+# the engine process, next to the API key.
+preload = ["./preload.ts"]
