@@ -15,10 +15,14 @@ name: Agent review (reusable)
 #   - Fork pull requests are excluded (they get no secrets anyway), and the on-demand path
 #     re-checks that the head belongs to the calling repository before it runs anything.
 #   - `pull_request_target` is not used and must not be added to the caller.
-#   - Only the `operator` login can start an on-demand run.
-#   - The reviewed head is data: it is checked out without credentials, and the engine that
-#     holds the key comes from this repository at the version of this workflow, never from the
-#     head. The engine launches Claude Code with `--restricted --strict-mcp-config
+#   - Only the `operator` login can start an on-demand run, and the jobs fail early when
+#     `operator` is empty or still a template placeholder.
+#   - The reviewed head is data: it is checked out without credentials into `head/`, and the
+#     engine that holds the key comes from this repository at the version of this workflow into
+#     `engine/`, never from the head. Bun runs inside `engine/` with `--no-env-file` and the
+#     engine's own `bunfig.toml`, so a `bunfig.toml` (whose `preload` runs code) or a `.env` in
+#     the head is never read; the head's path is passed with `--repo-dir`. The agent gets an
+#     allowlisted environment (docs/providers/claude-code.md). The engine launches Claude Code with `--restricted --strict-mcp-config
 #     --tools Read,Glob,Grep` and its own settings, so the head's `.claude/` settings and hooks
 #     are blocked, no MCP server starts and only read tools exist. That is not a sandbox: it is
 #     claimed only for what tests show.
@@ -109,6 +113,17 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: Check the operator input
+        env:
+          OPERATOR: ${{ inputs.operator }}
+        run: |
+          op="${OPERATOR//[[:space:]]/}"
+          lower="${op,,}"
+          if [ -z "$op" ] || [[ "$lower" == edit* ]] || [ "$lower" = "your-github-login" ]; then
+            echo "::error title=operator is not set::The workflow input 'operator' is empty or still a template placeholder ('$op'). Set it to your GitHub login in the caller workflow. A placeholder can be registered by anyone and would make them the operator."
+            exit 1
+          fi
+
       - name: Skip branches that are not reviewed
         id: gate
         env:
@@ -125,12 +140,15 @@ jobs:
           done
 
       # The head, not the default merge commit, so the files match the diff's lines. It is
-      # data: no credentials stay in its .git, and nothing in it is executed.
+      # data: it goes into `head/`, a sibling of the engine's `engine/`, no credentials stay in
+      # its .git, and the engine never runs with it as its working directory, so Bun reads no
+      # `bunfig.toml` or `.env` from it.
       - name: Checkout the pull request head
         if: steps.gate.outputs.skip != 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: head
           fetch-depth: 1
           persist-credentials: false
 
@@ -146,7 +164,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          path: .agent-review-engine
+          path: engine
           fetch-depth: 1
           persist-credentials: false
 
@@ -155,7 +173,9 @@ jobs:
         env:
           ENGINE_REPO: ${{ job.workflow_repository }}
           ENGINE_SHA: ${{ job.workflow_sha }}
-        run: echo "Engine $ENGINE_REPO@$ENGINE_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Engine $ENGINE_REPO@$ENGINE_SHA, run from engine/ with --no-env-file and its own bunfig.toml." >> "$GITHUB_STEP_SUMMARY"
+          echo "The reviewed head is in head/ and is read as data: its bunfig.toml and .env are never loaded." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Bun
         if: steps.gate.outputs.skip != 'true'
@@ -174,7 +194,7 @@ jobs:
         # proves integrity against the publisher, not against a compromised publisher; pass
         # the input to pin the hash independently. See docs/providers/claude-code.md.
         run: |
-          bash .agent-review-engine/src/install-claude-code.sh
+          bash engine/src/install-claude-code.sh
           echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Review the pull request
@@ -192,7 +212,10 @@ jobs:
           AGENT_REVIEW_PROVIDER: ${{ inputs.provider }}
           AGENT_REVIEW_MENTION: ${{ inputs.mention }}
           AGENT_REVIEW_OPERATOR: ${{ inputs.operator }}
-        run: bun .agent-review-engine/src/cli.ts review "$PR"
+        # Bun's working directory is `engine/`, which this repository owns. `--config=<path>`
+        # needs the equals sign: `-c <path>` did not replace the head's config in Bun 1.3.4.
+        working-directory: engine
+        run: bun --no-env-file --config=bunfig.toml src/cli.ts review "$PR" --repo-dir "$GITHUB_WORKSPACE/head"
 
   on-demand:
     name: Agent on demand
@@ -214,6 +237,18 @@ jobs:
       pull-requests: write
       issues: read
     steps:
+      # The `if:` above cannot fail loudly, so a placeholder operator is refused here as well.
+      - name: Check the operator input
+        env:
+          OPERATOR: ${{ inputs.operator }}
+        run: |
+          op="${OPERATOR//[[:space:]]/}"
+          lower="${op,,}"
+          if [ -z "$op" ] || [[ "$lower" == edit* ]] || [ "$lower" = "your-github-login" ]; then
+            echo "::error title=operator is not set::The workflow input 'operator' is empty or still a template placeholder ('$op'). Set it to your GitHub login in the caller workflow. A placeholder can be registered by anyone and would make them the operator."
+            exit 1
+          fi
+
       # `issue_comment` carries no head repository, so check it before anything reads the
       # head: on a fork's pull request the job stops instead of running its code with the key.
       - name: Refuse a fork pull request
@@ -227,11 +262,12 @@ jobs:
             exit 1
           fi
 
-      # The head is data, as in the `review` job.
+      # The head is data, as in the `review` job: it goes into `head/`.
       - name: Checkout the pull request head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
+          path: head
           fetch-depth: 1
           persist-credentials: false
 
@@ -241,7 +277,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          path: .agent-review-engine
+          path: engine
           fetch-depth: 1
           persist-credentials: false
 
@@ -249,7 +285,9 @@ jobs:
         env:
           ENGINE_REPO: ${{ job.workflow_repository }}
           ENGINE_SHA: ${{ job.workflow_sha }}
-        run: echo "Engine $ENGINE_REPO@$ENGINE_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Engine $ENGINE_REPO@$ENGINE_SHA, run from engine/ with --no-env-file and its own bunfig.toml." >> "$GITHUB_STEP_SUMMARY"
+          echo "The reviewed head is in head/ and is read as data: its bunfig.toml and .env are never loaded." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -266,7 +304,7 @@ jobs:
         # proves integrity against the publisher, not against a compromised publisher; pass
         # the input to pin the hash independently. See docs/providers/claude-code.md.
         run: |
-          bash .agent-review-engine/src/install-claude-code.sh
+          bash engine/src/install-claude-code.sh
           echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       # The comment reaches the engine through the environment, never interpolated into the
@@ -287,4 +325,6 @@ jobs:
           AGENT_REVIEW_PROVIDER: ${{ inputs.provider }}
           AGENT_REVIEW_MENTION: ${{ inputs.mention }}
           AGENT_REVIEW_OPERATOR: ${{ inputs.operator }}
-        run: bun .agent-review-engine/src/cli.ts comment "$PR"
+        # Bun's working directory is `engine/`; see the `review` job.
+        working-directory: engine
+        run: bun --no-env-file --config=bunfig.toml src/cli.ts comment "$PR" --repo-dir "$GITHUB_WORKSPACE/head"

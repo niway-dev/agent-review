@@ -28,7 +28,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EngineConfig } from "./config";
+import { operatorProblem, type EngineConfig } from "./config";
 import type { ProviderAdapter } from "./providers/types";
 
 export interface PrFile {
@@ -570,14 +570,14 @@ export const FOCUS_PATH = ".github/agent-review.md";
 export const OLD_FOCUS_PATH = ".github/claude-review.md";
 
 /** The repository's own review focus, appended to the rules when it exists. */
-function repoFocus(warn: (line: string) => void) {
+function repoFocus(warn: (line: string) => void, repoDir: string) {
   let path = FOCUS_PATH;
-  if (!existsSync(path) && existsSync(OLD_FOCUS_PATH)) {
+  if (!existsSync(join(repoDir, path)) && existsSync(join(repoDir, OLD_FOCUS_PATH))) {
     warn(`${OLD_FOCUS_PATH} is deprecated; rename it to ${FOCUS_PATH}.`);
     path = OLD_FOCUS_PATH;
   }
-  return existsSync(path)
-    ? `\n\nThis repository's review focus (${path}):\n\n${readFileSync(path, "utf8")}`
+  return existsSync(join(repoDir, path))
+    ? `\n\nThis repository's review focus (${path}):\n\n${readFileSync(join(repoDir, path), "utf8")}`
     : "";
 }
 
@@ -595,6 +595,12 @@ export interface Deps {
   gh: GhFn;
   provider: ProviderAdapter;
   config: EngineConfig;
+  /**
+   * The checked-out head of the pull request: data the engine reads (the focus file) and the
+   * agent's working directory. It is never the engine's own working directory. Default: the
+   * current directory.
+   */
+  repoDir?: string;
   log: (line: string) => void;
   warn: (line: string) => void;
 }
@@ -1004,7 +1010,7 @@ function reviewBatch(
     threads.length > 0,
     part,
     dir,
-    repoFocus(deps.warn),
+    repoFocus(deps.warn, deps.repoDir ?? process.cwd()),
   );
 
   const call = attempt(() => runProvider(deps, prompt, dir, budgetUsd, SCHEMA), budgetUsd);
@@ -1027,7 +1033,7 @@ function reviewBatch(
 function runProvider(deps: Deps, prompt: string, dir: string, budgetUsd: number, schema?: object) {
   const result = deps.provider.run({
     prompt,
-    cwd: process.cwd(),
+    cwd: deps.repoDir ?? process.cwd(),
     addDirs: [dir],
     allowedTools: ["read", "glob", "grep"],
     maxBudgetUsd: budgetUsd,
@@ -1079,12 +1085,16 @@ nothing else. Write in English.`;
 
 /**
  * The `comment` command: routes the operator's comment to a review, an answer or nothing.
- * `author` is the comment's author when the caller knows it; with an operator configured, anyone
- * else is ignored (the workflow checks this too).
+ * `author` is the comment's author when the caller knows it; anyone else is ignored (the workflow
+ * checks this too). An empty or placeholder operator is an error.
  */
 export function comment(deps: Deps, repo: string, pr: number, request: string, author?: string) {
   const { operator } = deps.config;
-  if (author && operator && author.toLowerCase() !== operator.toLowerCase()) {
+  // Before anything else: an unset or placeholder operator would let a stranger who registered
+  // that login command the tool.
+  const problem = operatorProblem(operator);
+  if (problem) throw new Error(problem);
+  if (author && author.toLowerCase() !== operator.toLowerCase()) {
     deps.warn(`Comment by ${author}, not the operator ${operator}; nothing to do.`);
     return;
   }

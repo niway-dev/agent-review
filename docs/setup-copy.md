@@ -79,6 +79,7 @@ prompts without calling Claude.
 | Copy to | From |
 | --- | --- |
 | `scripts/agent-review/` | The whole `src/` folder of this repository: `cli.ts`, `engine.ts`, `config.ts` and `providers/` (including `providers/claude-code.settings.json`, which the adapter looks for next to itself and refuses to run without). Leave out the `*.test.ts` files, or keep them and run them with `bun test ./scripts/agent-review` |
+| `scripts/agent-review/bunfig.toml` | The `bunfig.toml` at the root of this repository. The workflow passes it with `--config=` so Bun reads no `bunfig.toml` from the pull request's checkout |
 | `.github/workflows/agent-review.yml` | `templates/caller-workflow.yml`: edit its trust paragraph, the operator login (twice) and the other `EDIT THIS` markers |
 | `.github/agent-review.md` | Write it: the repository's review focus, as a short list. Optional |
 
@@ -99,7 +100,7 @@ The CLI needs Bun (the workflow pins 1.3.4) and nothing else from the repository
    ```
    In the web UI: Settings → Secrets and variables → Actions → **Repository secrets** → New
    repository secret.
-3. **Copy the files** above. Run `bun scripts/agent-review/cli.ts --help` once to check the copy.
+3. **Copy the files** above. Run `bun --no-env-file --config=scripts/agent-review/bunfig.toml scripts/agent-review/cli.ts --help` once to check the copy.
 4. **Write `.github/agent-review.md`**: the rules a reviewer of this repository must know, taken
    from its `CLAUDE.md`, not invented.
 5. **Open the pull request that adds the kit, ready for review.** A `pull_request` workflow runs

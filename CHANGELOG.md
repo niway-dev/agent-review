@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Security
+
+- The reusable workflow checks the reviewed head out into `head/` and the engine into a sibling
+  `engine/`, and runs Bun from `engine/` with `--no-env-file --config=bunfig.toml`, so a
+  `bunfig.toml` `preload` or a `.env` in the head is never loaded into the process that holds the
+  API key. New `--repo-dir <dir>` option (default `.`) for the head's path; the engine uses it for
+  file reads and as the agent's working directory. New engine-owned `bunfig.toml`. The copy-the-files
+  template uses the same flags and documents that it cannot fully separate engine and head. (#7)
+- The Claude Code adapter builds the agent's environment from an allowlist (`PATH`, `HOME`,
+  `TMPDIR`, `TERM`, `LANG`, `LC_*`, `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`, `CI`,
+  `GITHUB_ACTIONS`) instead of the parent's environment minus two tokens. (#7)
+- Hostile fixture `test/fixtures/hostile/` and tests for the Bun flags and the environment. (#7)
+- The reusable workflow fails early when `operator` is empty or a template placeholder
+  (`EDIT…`, `your-github-login`), and `comment` refuses the same values from
+  `AGENT_REVIEW_OPERATOR`. (#12)
+
+### Supply chain
+
 - Workflows: `actions/checkout` and `oven-sh/setup-bun` are pinned by full commit SHA with the
   version in a trailing comment (also in `templates/caller-workflow.yml`); the actionlint image
   in CI is pinned by digest. Dependabot (`.github/dependabot.yml`) updates the action pins weekly.

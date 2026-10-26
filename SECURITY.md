@@ -20,6 +20,13 @@ The tool is safe to use only under these assumptions:
 - **Fork pull requests are excluded.** They get no secrets from GitHub, and the workflow skips
   them. The comment path checks that the pull request's head belongs to the same
   repository before it runs anything. `pull_request_target` is not used and must not be added.
+- **The engine never runs inside the reviewed head.** The reusable workflow checks the head out
+  into `head/` and the engine into a sibling `engine/`, and starts Bun with `engine/` as its
+  working directory, `--no-env-file` and `--config=bunfig.toml` (the engine's own file). Bun
+  therefore does not load a `bunfig.toml` (whose `preload` runs code) or a `.env` file (which could
+  set `ANTHROPIC_BASE_URL` or a proxy) from the head. The head's path is passed with `--repo-dir`.
+  The agent CLI gets an allowlisted environment: no GitHub token, base URL, proxy or runtime
+  option (see [docs/providers/claude-code.md](docs/providers/claude-code.md)).
 - **The agent only reads.** Claude Code runs with `--restricted`, `--strict-mcp-config`,
   `--tools Read,Glob,Grep` and the adapter's own settings file (which denies `Bash` and `/proc`
   reads; see [docs/providers/claude-code.md](docs/providers/claude-code.md)). It has no shell,
@@ -37,7 +44,25 @@ The tool is safe to use only under these assumptions:
 
 This is not a sandbox. Managed Claude Code settings on the runner still apply.
 
+## What from the head is executed, and what is read
+
+Never executed by the engine: the head's Bun configuration and environment files, and its Claude
+Code settings and hooks (see above). Still read as data: the head's files through the agent's read
+tools, its `CLAUDE.md` (the prompt asks the agent to read it), and the focus file
+`.github/agent-review.md`, whose text is appended to the prompt. Content the agent reads can still
+try to steer the review (prompt injection); that is what the read-only tools, the budget caps and
+the trust assumption are for.
+
+The "copy the files" install cannot separate engine and head: the copied engine sits in the
+consumer repository, so on `pull_request` it is the pull request's own copy. It uses the same Bun
+flags, but the reusable workflow is the preferred install.
+
 ## What is unverified
+
+- That Bun's `--no-env-file` and `--config=` keep out every runtime file. Only `bunfig.toml`
+  `preload` and `.env` are tested (Bun 1.3.4, `test/bun-isolation.test.ts`); other files Bun can
+  read from a working directory are avoided by never using the head as one, not by a test.
+- The new workflow layout has not been exercised in a full paid run.
 
 - Whether the `/proc` deny rules in the engine settings have any effect under `--restricted`.
 - Whether the reviewed branch's `CLAUDE.md` is still loaded as memory under `--restricted`.

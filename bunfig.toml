@@ -1,0 +1,6 @@
+# Engine-owned Bun configuration. The workflow runs the engine with
+# `bun --no-env-file --config=<this file>`, so Bun never reads a bunfig.toml (and its
+# `preload`, which runs code) or a .env file from the reviewed pull request's checkout.
+# Keep this file minimal: no `preload`, no `env`.
+[install]
+auto = "disable"
