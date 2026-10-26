@@ -71,6 +71,12 @@ on:
         description: Pinned Claude Code version
         type: string
         default: 2.1.304
+      claude_code_sha256:
+        description: >-
+          Optional SHA-256 of the Claude Code binary for the runner's platform (linux-x64 on
+          ubuntu-latest). Empty means the hash is read from the publisher's manifest.
+        type: string
+        default: ""
       bun_version:
         description: Pinned Bun version
         type: string
@@ -139,7 +145,7 @@ jobs:
       # `bunfig.toml` or `.env` from it.
       - name: Checkout the pull request head
         if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: head
@@ -154,7 +160,7 @@ jobs:
       # So the engine version always equals the version of this workflow that was called.
       - name: Checkout the engine at this workflow's version
         if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -173,7 +179,7 @@ jobs:
 
       - name: Setup Bun
         if: steps.gate.outputs.skip != 'true'
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
 
@@ -181,9 +187,15 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         env:
           CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
+          CLAUDE_CODE_SHA256: ${{ inputs.claude_code_sha256 }}
+          CLAUDE_INSTALL_DIR: ${{ runner.temp }}/claude-bin
+        # Downloads the pinned binary and fails the job unless its SHA-256 matches. With no
+        # `claude_code_sha256` the expected hash comes from the publisher's manifest, which
+        # proves integrity against the publisher, not against a compromised publisher; pass
+        # the input to pin the hash independently. See docs/providers/claude-code.md.
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash engine/src/install-claude-code.sh
+          echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Review the pull request
         if: steps.gate.outputs.skip != 'true'
@@ -252,7 +264,7 @@ jobs:
 
       # The head is data, as in the `review` job: it goes into `head/`.
       - name: Checkout the pull request head
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
           path: head
@@ -261,7 +273,7 @@ jobs:
 
       # See the `review` job for why this is `job.workflow_sha` and not `github.workflow_sha`.
       - name: Checkout the engine at this workflow's version
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -278,16 +290,22 @@ jobs:
           echo "The reviewed head is in head/ and is read as data: its bunfig.toml and .env are never loaded." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
 
       - name: Install Claude Code
         env:
           CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
+          CLAUDE_CODE_SHA256: ${{ inputs.claude_code_sha256 }}
+          CLAUDE_INSTALL_DIR: ${{ runner.temp }}/claude-bin
+        # Downloads the pinned binary and fails the job unless its SHA-256 matches. With no
+        # `claude_code_sha256` the expected hash comes from the publisher's manifest, which
+        # proves integrity against the publisher, not against a compromised publisher; pass
+        # the input to pin the hash independently. See docs/providers/claude-code.md.
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash engine/src/install-claude-code.sh
+          echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       # The comment reaches the engine through the environment, never interpolated into the
       # shell, so its text cannot run as a command.

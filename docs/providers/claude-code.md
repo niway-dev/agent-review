@@ -9,6 +9,42 @@ version 2.1.304), and `ANTHROPIC_API_KEY` in the environment. A dry run
 `preflight()` runs before any call is paid for and fails if the binary does not answer
 `--version` or the settings file is missing.
 
+## How the binary is verified
+
+The reusable workflow does not pipe the official install script into a shell. It runs
+`src/install-claude-code.sh`, which downloads the pinned version directly:
+
+1. It reads the expected SHA-256 for the runner's platform (`linux-x64` on `ubuntu-latest`) from
+   `https://downloads.claude.ai/claude-code-releases/<version>/manifest.json`
+   (`.platforms["<platform>"].checksum`). This is the same manifest the official installer uses.
+2. It downloads `.../<version>/<platform>/claude` and computes its SHA-256.
+3. If the two differ the step fails and nothing is installed. Otherwise the binary goes into
+   `$RUNNER_TEMP/claude-bin`, which is added to `PATH`.
+
+The manifest and the binary are served from the same origin. This check proves the download is
+intact and is what the publisher released for that version; it does not protect against a
+compromised publisher. To pin the hash independently, set the optional `claude_code_sha256` input
+in the caller file. When it is set, the manifest is not used:
+
+```yaml
+    with:
+      claude_code_version: 2.1.304
+      claude_code_sha256: ea0f135784631619a7a409d07322ecec964f9cc4fd377508ed1ba3f141f27912 # linux-x64
+```
+
+The hash is for one platform; GitHub's `ubuntu-latest` runners are `linux-x64`. When the version
+moves, the hash must move with it: download the binary once, run `sha256sum claude`, and compare
+it with the manifest before committing the new value. Known values for 2.1.304:
+
+| Platform | SHA-256 |
+| --- | --- |
+| `linux-x64` | `ea0f135784631619a7a409d07322ecec964f9cc4fd377508ed1ba3f141f27912` |
+| `linux-arm64` | `c487117526509ab6d2ee6013e14f181faf68d6d6afe6bb0d4b2b4a9feca5ecb3` |
+
+The copy template runs the same script from the copied `src/` folder; set `CLAUDE_CODE_SHA256`
+on its install step to pin the hash. The script installs only the binary; it does not run
+`claude install`, so no launcher or shell integration is set up.
+
 ## What the adapter does
 
 | Engine asks for | Adapter passes |
@@ -80,6 +116,9 @@ Verified:
 
 Not verified:
 
+- That the binary installed by `src/install-claude-code.sh` runs a full review on a hosted runner.
+  The download, hash check and mismatch failure were tested in a shell; the first run of the
+  workflow after this change is the real test.
 - That the `/proc` deny rules do anything under `--restricted`. `--restricted` confines file
   tools to the working directories, which may already exclude `/proc`, but nothing here proves
   it. The rules stay because they cost nothing.
