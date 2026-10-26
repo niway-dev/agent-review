@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.0](https://github.com/niway-dev/agent-review/compare/v1.0.0-rc.1...v1.0.0) (2026-10-26)
+
+
+### Bug Fixes
+
+* apply the engine, workflow, adapter, test and docs changes ([81f7b97](https://github.com/niway-dev/agent-review/commit/81f7b97e1e5d62da2941fff94ded58559ddd9a10))
+* run the engine outside the reviewed head and refuse placeholder operators ([dce52be](https://github.com/niway-dev/agent-review/commit/dce52be569019a3944702ab97c87cd14b62b405d))
+* run the engine outside the reviewed head; refuse placeholder operators ([2646cdd](https://github.com/niway-dev/agent-review/commit/2646cdd7fdbe6ca7430cb4e596573290ea7d3980))
+
 ## 1.0.0-rc.2 (hand-written, before release-please)
 
 This section and everything below it were written by hand. From the first release-please release
