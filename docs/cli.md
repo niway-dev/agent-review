@@ -32,7 +32,7 @@ equals sign: `-c <path>` did not replace the working directory's config in Bun 1
 | Command | What it does |
 | --- | --- |
 | `review <pr> [paths…]` | Reviews the pull request. After the first review, only what changed since the last reviewed commit. With paths, only those paths (words that name no changed file are ignored). Posts one GitHub review with inline comments, and replies in its own open threads. |
-| `comment <pr>` | Fails with exit 1 when `AGENT_REVIEW_OPERATOR` is empty or a template placeholder (`EDIT…`, `your-github-login`). Reads the comment from `REQUEST`. If it mentions the tool (`AGENT_REVIEW_MENTION`, default `@agent-review`, or the alias `@claude`): `review [paths…]` runs a review, anything else is a question answered as a pull request comment. A comment without a mention does nothing. |
+| `comment <pr>` | Fails with exit 1 when `AGENT_REVIEW_OPERATOR` is empty or a template placeholder (`EDIT…`, `your-github-login`). Reads the comment from `REQUEST`. If it mentions the tool (`AGENT_REVIEW_MENTION`, default `/wachi`, or the aliases `@agent-review` and `@claude`): `review [paths…]` runs a review, anything else is a question answered as a pull request comment. A comment without a mention does nothing. |
 
 ## What it posts
 
@@ -79,7 +79,7 @@ Settings, all optional:
 | `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent: `claude-code` (docs/providers/claude-code.md) or `codex` (docs/providers/codex.md). Any other value is a usage error that lists the accepted ones |
 | `AGENT_REVIEW_PRICE_PER_MTOK` | unset | `codex` only: `"input,cached_input,output"` in USD per million tokens, for a model without a built-in price |
 | `AGENT_REVIEW_REASONING_EFFORT` | unset | `codex` only: passed as `model_reasoning_effort` (for example `high`); unset keeps the model's default |
-| `AGENT_REVIEW_MENTION` | `@agent-review` | The keyword `comment` looks for. `@claude` always works as an alias |
+| `AGENT_REVIEW_MENTION` | `/wachi` | The keyword `comment` looks for. `@agent-review` and `@claude` always work as aliases. The keyword must start a word, so `docs/wachi` is not a command |
 | `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. `comment` requires it: empty, `your-github-login` and anything starting with `EDIT` are refused. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
 | `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files. The reusable workflow has no input for it; it works only in the copy-the-files install |
 | `AGENT_REVIEW_COMMENT_AUTHOR` | unset | `comment` only: the comment author's login. A different author than `AGENT_REVIEW_OPERATOR` makes `comment` do nothing and exit 0 |

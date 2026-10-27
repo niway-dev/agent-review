@@ -54,7 +54,7 @@ them as a repository admin. This is also the only manual tag instruction left.
 One secret, `RELEASE_PLEASE_TOKEN`, is all that is needed; it is the same personal access token the maintainer's other repositories use. Create a fine-grained personal access token owned by a repository
 admin (who is a bypass actor of the `v*` tag ruleset), with:
 
-- Resource owner and repository access: only `niway-dev/agent-review`.
+- Resource owner and repository access: only `niway-dev/wachi-reviewer`.
 - Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**
   (**Metadata: Read** is added automatically).
 - A short expiry; put the renewal date in your calendar. An expired token shows up as the alias

@@ -7,7 +7,7 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/niway-dev/agent-review.git"
+    "url": "git+https://github.com/niway-dev/wachi-reviewer.git"
   },
   "bin": {
     "agent-review": "src/cli.ts"
