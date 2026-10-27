@@ -47,8 +47,8 @@ on it being one.
    tag never changes what reviews ask for.
 5. **No `pull_request_target`.** It would give fork pull requests secrets, which is the usual
    route to running untrusted code with a key. Review triggers stay `pull_request` plus the
-   operator's `@claude` comment. (Update: the default mention is now `@agent-review`, with
-   `@claude` kept as an alias.)
+   operator's `@claude` comment. (Update: the default command is now `/wachi`, with
+   `@agent-review` and `@claude` kept as aliases; see ADR 0005.)
 6. **Fork and untrusted pull requests are excluded.** The tool is meant for repositories where
    everyone who can push is trusted. That boundary is a documented assumption, not a feature the
    engine enforces against a person who can edit the workflow. The consequence is that the

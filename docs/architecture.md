@@ -136,7 +136,7 @@ All names are in `src/engine.ts` unless a file is given.
 9. **The conversation path.** `comment` (called by `src/cli.ts comment`) first runs
    `operatorProblem` (an empty or template-placeholder operator is an error), then ignores a
    comment whose author is not `AGENT_REVIEW_OPERATOR`, then `parseCommand` looks for the mention
-   (`@agent-review` by default, `@claude` always). `review [paths]` runs the pipeline above;
+   (`/wachi` by default; `@agent-review` and `@claude` always). `review [paths]` runs the pipeline above;
    anything else goes to `answer`: one provider call with `AGENT_REVIEW_ANSWER_BUDGET_USD`,
    free-text output, the pull request metadata and full diff in a scratch directory, the same leak
    check, posted as a pull request comment. Thread replies work through the review path: with a
@@ -153,7 +153,7 @@ All names are in `src/engine.ts` unless a file is given.
 | Job | Runs when | What it does |
 | --- | --- | --- |
 | `review` | `pull_request`, not a draft, head repository equals the calling repository, actor is not Dependabot | Checks the operator input, skips branches with a prefix in `skip_branch_prefixes`, then runs `cli.ts review` |
-| `on-demand` | `issue_comment` on a pull request, commenter login equals `operator`, body contains the mention or `@claude` | Checks the operator input, refuses a pull request whose head repository is not the calling repository, then runs `cli.ts comment` |
+| `on-demand` | `issue_comment` on a pull request, commenter login equals `operator`, body contains the mention, `@agent-review` or `@claude` | Checks the operator input, refuses a pull request whose head repository is not the calling repository, then runs `cli.ts comment` |
 
 Both have a 30-minute timeout and a concurrency group per pull request (not per workflow, so a
 skipped `on-demand` never cancels a review). Both run with `contents: read` and
@@ -249,7 +249,7 @@ deprecated `CLAUDE_REVIEW_X` with a notice. Full descriptions are in [cli.md](cl
 | `AGENT_REVIEW_BATCH_CHARS` | `140000` | `src/config.ts`; input `batch_chars` |
 | `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` | `src/config.ts`; input `model` |
 | `AGENT_REVIEW_PROVIDER` | `claude-code` | `src/config.ts` and `DEFAULT_PROVIDER` in `src/providers/index.ts`; input `provider` |
-| `AGENT_REVIEW_MENTION` | `@agent-review` | `src/config.ts` and `parseCommand`; input `mention`; `@claude` is `MENTION_ALIAS` |
+| `AGENT_REVIEW_MENTION` | `/wachi` | `src/config.ts` and `DEFAULT_MENTION`; input `mention`; `@agent-review` and `@claude` are `MENTION_ALIASES` |
 | `AGENT_REVIEW_OPERATOR` | none (required by `comment`) | no default; validated by `operatorProblem`; input `operator` is required |
 | `AGENT_REVIEW_EXCLUDE` | none | `src/config.ts`; no workflow input |
 | `AGENT_REVIEW_DRY_RUN` | off | `src/config.ts`; no workflow input |
@@ -286,13 +286,13 @@ and the copy-the-files install. The two sets must stay equal.
 
 ## Known limits and open issues
 
-- Open issues: [#5](https://github.com/niway-dev/agent-review/issues/5) (the ADR directory the
-  prompt names is fixed), [#8](https://github.com/niway-dev/agent-review/issues/8) (one account
+- Open issues: [#5](https://github.com/niway-dev/wachi-reviewer/issues/5) (the ADR directory the
+  prompt names is fixed), [#8](https://github.com/niway-dev/wachi-reviewer/issues/8) (one account
   moving the floating `v1` tag changes the code every consumer runs with its key),
-  [#10](https://github.com/niway-dev/agent-review/issues/10) (the focus file and `CLAUDE.md` are
-  read from the pull request head), [#11](https://github.com/niway-dev/agent-review/issues/11)
+  [#10](https://github.com/niway-dev/wachi-reviewer/issues/10) (the focus file and `CLAUDE.md` are
+  read from the pull request head), [#11](https://github.com/niway-dev/wachi-reviewer/issues/11)
   (posted output is checked only for the key's exact value and shape, so an encoded key passes).
-  Issue [#9](https://github.com/niway-dev/agent-review/issues/9) (pin actions by SHA) is still
+  Issue [#9](https://github.com/niway-dev/wachi-reviewer/issues/9) (pin actions by SHA) is still
   open although the workflows are pinned on `main`.
 - The review is advisory and trusts everyone who can push to the repository.
 - Two adapters exist, Claude Code and Codex (ADR 0004). The reusable workflow installs only Claude Code so far.

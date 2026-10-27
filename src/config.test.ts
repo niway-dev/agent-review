@@ -18,7 +18,7 @@ describe("loadConfig", () => {
       dryRun: false,
       model: "claude-sonnet-5-5",
       provider: "claude-code",
-      mention: "@agent-review",
+      mention: "/wachi",
       operator: "",
       exclude: [],
     });

@@ -134,14 +134,17 @@ export const label = (f: Finding) =>
   `${SEVERITY[f.severity].emoji}${TOPIC[f.topic].emoji} **${SEVERITY[f.severity].word} · ${TOPIC[f.topic].word}: ${f.title}**`;
 const at = (f: { path: string; line: number }) => (f.line > 0 ? `${f.path}:${f.line}` : f.path);
 
-/** The mention that always works besides the configured keyword, during the migration. */
-export const MENTION_ALIAS = "@claude";
+/** The default command keyword. A slash command, so writing it notifies no GitHub account. */
+export const DEFAULT_MENTION = "/wachi";
+/** The earlier keywords, which keep working besides the configured one (ADR 0005). */
+export const MENTION_ALIASES = ["@agent-review", "@claude"];
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function parseCommand(body: string, keyword = "@agent-review"): Command | null {
-  // Only the rest of the first line: "@agent-review review\n\nthanks" asks for a review, not a path.
-  const names = [keyword, MENTION_ALIAS].map(escapeRegExp).join("|");
-  const match = body.match(new RegExp(`(?:${names})(?![\\w-])(.*)`));
+export function parseCommand(body: string, keyword = DEFAULT_MENTION): Command | null {
+  // Only the rest of the first line: "/wachi review\n\nthanks" asks for a review, not a path.
+  // The keyword must start a word, so "docs/wachi" or "me@claude" is not a command.
+  const names = [keyword, ...MENTION_ALIASES].map(escapeRegExp).join("|");
+  const match = body.match(new RegExp(`(?<![\\w./@-])(?:${names})(?![\\w-])(.*)`));
   if (!match) return null;
   const words = match[1].trim().split(/\s+/).filter(Boolean);
   if (words[0]?.toLowerCase() === "review") return { kind: "review", paths: words.slice(1) };
@@ -507,7 +510,7 @@ export function buildReview(input: {
   mention?: string;
 }): Review {
   const { output, files, headSha, since, scoped, costUsd, batches = [], modelLabel } = input;
-  const mention = input.mention ?? "@agent-review";
+  const mention = input.mention ?? DEFAULT_MENTION;
   const commentable = new Map(files.map((f) => [f.filename, commentableLines(f.patch ?? "")]));
   const comments: InlineComment[] = [];
   const outsideDiff: Finding[] = [];

@@ -34,7 +34,7 @@ The tool is safe to use only under these assumptions:
 - **The CLI holds the credentials.** It posts the review and posts nothing at all (it stops with an error) if any text it would post contains
   the API key, either the job's exact key or anything shaped like one. An encoded key would pass
   that check.
-- **Only trusted people can start a run on demand.** Only the operator's `@agent-review` comment (or its `@claude` alias) starts
+- **Only trusted people can start a run on demand.** Only the operator's `/wachi` comment (or its `@agent-review` and `@claude` aliases) starts
   an on-demand run, and only replies from `OWNER`, `MEMBER` or `COLLABORATOR` reach the agent.
 
 - **Supply chain.** A consumer pins this reusable workflow to an exact release tag, which the

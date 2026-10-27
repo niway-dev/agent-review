@@ -1,7 +1,10 @@
-# agent-review
+# Wachi Reviewer
+
+<img src="docs/assets/wachi.png" alt="Wachi, a cartoon watchman with a cap and a whistle" width="96" align="right">
 
 Advisory pull request reviews by an agent CLI, run inside your own GitHub Actions with your own
-API key.
+API key. Wachi is named after the Peruvian *wachimán*, the watchman who warns you and lets you
+decide. Comment `/wachi review` on a pull request to ask for a review of what changed.
 
 Each finding arrives as an inline review comment on its line, labelled with a severity (when to
 act: Blocker, Fix, Consider) and a topic (what it is about: bug, docs, security…), for example
@@ -67,7 +70,7 @@ name: Agent review
 # Pin an exact release tag (`@v1.0.0`): it never moves, every update arrives as a Dependabot pull
 # request you read first, and a bad release is undone by editing the tag back. Do not use the floating
 # `@v1`: it would run each new release with your key before you have seen it.
-# First install: the installing pull request gets only the automatic review. `@agent-review review`
+# First install: the installing pull request gets only the automatic review. `/wachi review`
 # and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
 on:
   pull_request: { types: [opened, ready_for_review] }
@@ -75,7 +78,7 @@ on:
 permissions: { contents: read, pull-requests: write, issues: read }
 jobs:
   review:
-    uses: niway-dev/agent-review/.github/workflows/review.yml@v1.0.0
+    uses: niway-dev/wachi-reviewer/.github/workflows/review.yml@v1.0.0
     with:
       operator: EDIT-THIS-github-login
     secrets:
