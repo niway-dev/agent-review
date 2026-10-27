@@ -7,15 +7,15 @@ name: Agent review
 # advisory: never a required check, never an approval or a change request, never a merge
 # gate. What to look for beyond the defaults is in `.github/agent-review.md`.
 #
-# The "copy the files" workflow template. Copy it with the `src/` folder of agent-review
+# The "copy the files" workflow template. Copy it with the `src/` folder of niway-dev/wachi-reviewer
 # (as `scripts/agent-review/`, see docs/setup-copy.md), record the decision in the repository's ADRs, and edit the
 # trust paragraph below to say who can push. It runs narrowly:
 #   - `review`: once, when a pull request opens ready for review or leaves draft.
 #     A later push does not re-run it.
 #   - `on-demand`: when the repository owner comments on a pull request:
-#     `@agent-review review` re-reviews what changed since the last reviewed commit and
-#     answers the owner's replies in the open threads; `@agent-review review <path>…` reviews
-#     only those paths; any other `@agent-review …` comment is a question, answered as a comment.
+#     `/wachi review` re-reviews what changed since the last reviewed commit and
+#     answers the owner's replies in the open threads; `/wachi review <path>…` reviews
+#     only those paths; any other `/wachi …` comment is a question, answered as a comment.
 #
 # Limit of this install: the copied engine lives in the consumer repository itself, so engine and
 # reviewed head cannot be fully separated here (on `pull_request` the engine is the pull request's
@@ -40,7 +40,7 @@ name: Agent review
 # repository), so everything the agent reads is trusted. A public repository needs more
 # before copying this file: prompt injection and outside contributors. Three things
 # already keep strangers out: fork pull requests are skipped (they get no secrets anyway),
-# only the operator's `@agent-review` comment starts a run, and only replies from people with
+# only the operator's `/wachi` comment starts a run, and only replies from people with
 # access reach the agent. Claude Code runs with `--restricted --strict-mcp-config
 # --tools Read,Glob,Grep --settings claude-code.settings.json` (docs/providers/claude-code.md):
 # the head's user, project and local settings (its `.claude/` hooks included) are ignored,
@@ -54,7 +54,7 @@ on:
     types: [opened, ready_for_review]
   # GitHub runs `issue_comment` workflows from the default branch's copy of this file. The
   # pull request that installs the workflow therefore gets only the `pull_request` review;
-  # `@agent-review review` and thread replies start working once the file is on the default branch.
+  # `/wachi review` and thread replies start working once the file is on the default branch.
   issue_comment:
     types: [created]
 
@@ -69,7 +69,7 @@ env:
   # Pinned: the version is part of what was verified to work (see above). Bump it by
   # hand, and re-run a review to check.
   CLAUDE_CODE_VERSION: 2.1.304
-  # Batch size, and the most one batch, one pull request and one `@agent-review` question may
+  # Batch size, and the most one batch, one pull request and one `/wachi` question may
   # spend. Past the pull request's budget the remaining batches are listed as not reviewed.
   # A pull request edits these for its own `review` run, which the trust assumption above
   # accepts.
@@ -137,13 +137,14 @@ jobs:
     # EDIT THIS: replace 'your-github-login' below with the operator's login, and keep it equal
     # to AGENT_REVIEW_OPERATOR above (a job `if:` cannot read `env`). Matching by login works
     # for user-owned and organisation-owned repositories alike (`author_association` is `OWNER`
-    # in the first and `MEMBER` in the second). `@claude` is accepted as an alias while
-    # installed copies migrate.
+    # in the first and `MEMBER` in the second). `@agent-review` and `@claude` are accepted as aliases
+    # while installed copies migrate.
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       github.event.comment.user.login == 'your-github-login' &&
-      (contains(github.event.comment.body, '@agent-review') ||
+      (contains(github.event.comment.body, '/wachi') ||
+       contains(github.event.comment.body, '@agent-review') ||
        contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another

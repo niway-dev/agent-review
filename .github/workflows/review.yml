@@ -36,9 +36,9 @@ on:
         type: string
         required: true
       mention:
-        description: Mention that starts an on-demand run (`@claude` is always accepted too)
+        description: Command that starts an on-demand run (`@agent-review` and `@claude` are always accepted too)
         type: string
-        default: "@agent-review"
+        default: "/wachi"
       budget_usd:
         description: Most one pull request review may spend, in USD
         type: number
@@ -226,6 +226,7 @@ jobs:
       github.event.issue.pull_request &&
       github.event.comment.user.login == inputs.operator &&
       (contains(github.event.comment.body, inputs.mention) ||
+       contains(github.event.comment.body, '@agent-review') ||
        contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another

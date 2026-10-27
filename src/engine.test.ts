@@ -54,45 +54,56 @@ const output = (over: Partial<ReviewOutput> = {}): ReviewOutput => ({
 
 describe("parseCommand", () => {
   test("reads a review request, with or without paths", () => {
-    expect(parseCommand("@agent-review review")).toEqual({ kind: "review", paths: [] });
-    expect(parseCommand("@agent-review review apps/api/src/main docs/")).toEqual({
+    expect(parseCommand("/wachi review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("/wachi review apps/api/src/main docs/")).toEqual({
       kind: "review",
       paths: ["apps/api/src/main", "docs/"],
     });
   });
 
-  test("accepts @claude as an alias for the configured keyword", () => {
+  test("accepts @agent-review and @claude as aliases for the configured keyword", () => {
+    expect(parseCommand("@agent-review review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@agent-review review docs/")).toEqual({ kind: "review", paths: ["docs/"] });
     expect(parseCommand("@claude review")).toEqual({ kind: "review", paths: [] });
     expect(parseCommand("@claude review docs/")).toEqual({ kind: "review", paths: ["docs/"] });
     expect(parseCommand("@claude why is this async?")).toEqual({ kind: "answer" });
   });
 
-  test("uses the configured keyword, and still accepts the alias", () => {
+  test("uses the configured keyword, and still accepts the aliases", () => {
     expect(parseCommand("@reviewer review src/", "@reviewer")).toEqual({
       kind: "review",
       paths: ["src/"],
     });
     expect(parseCommand("@claude review", "@reviewer")).toEqual({ kind: "review", paths: [] });
-    expect(parseCommand("@agent-review review", "@reviewer")).toBeNull();
+    expect(parseCommand("@agent-review review", "@reviewer")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("/wachi review", "@reviewer")).toBeNull();
     // Regex characters in a keyword are literal.
     expect(parseCommand("@a.b review", "@a.b")).toEqual({ kind: "review", paths: [] });
     expect(parseCommand("@aXb review", "@a.b")).toBeNull();
   });
 
   test("reads only the first line, so a trailing sentence is not a path", () => {
-    expect(parseCommand("@agent-review review again\n\nthanks")).toEqual({
+    expect(parseCommand("/wachi review again\n\nthanks")).toEqual({
       kind: "review",
       paths: ["again"],
     });
   });
 
   test("treats any other mention as a question", () => {
-    expect(parseCommand("@agent-review why is this async?")).toEqual({ kind: "answer" });
+    expect(parseCommand("/wachi why is this async?")).toEqual({ kind: "answer" });
   });
 
   test("ignores comments that do not mention the tool", () => {
     expect(parseCommand("looks good, thanks")).toBeNull();
+    expect(parseCommand("/wachi-bot review")).toBeNull();
     expect(parseCommand("@agent-reviewer review")).toBeNull();
+  });
+
+  test("does not read the keyword inside a path or a URL", () => {
+    expect(parseCommand("see docs/wachi review")).toBeNull();
+    expect(parseCommand("see https://example.com/wachi review")).toBeNull();
+    expect(parseCommand("mail me@claude review")).toBeNull();
+    expect(parseCommand("thanks!\n/wachi review")).toEqual({ kind: "review", paths: [] });
   });
 });
 
