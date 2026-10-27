@@ -61,7 +61,7 @@ Required:
 | `GH_TOKEN` | Token for `gh`. It is never given to the agent. |
 | `GITHUB_REPOSITORY` | `owner/name` of the repository. |
 | `REQUEST` | `comment` only: the comment text. Pass it through the environment, never interpolated into a shell command. |
-| Provider credentials | For `claude-code`: `ANTHROPIC_API_KEY` (not needed with `AGENT_REVIEW_DRY_RUN=1`, which uses the machine's own login). |
+| Provider credentials | For `claude-code`: `ANTHROPIC_API_KEY`. For `codex`: `OPENAI_API_KEY`. Neither is needed with `AGENT_REVIEW_DRY_RUN=1`, which uses the machine's own login. |
 
 The `gh` CLI and the provider's binary (`claude` for `claude-code`) must be on the `PATH`.
 
@@ -75,8 +75,10 @@ Settings, all optional:
 | `AGENT_REVIEW_BATCH_LINES` | `1000` | Changed lines per batch |
 | `AGENT_REVIEW_BATCH_CHARS` | `140000` | Characters of diff per batch (about 40k tokens at 3.5 characters a token) |
 | `AGENT_REVIEW_DRY_RUN` | unset | `1`: read GitHub, print the review instead of posting. The reusable workflow has no input for it; it works only in the copy-the-files install |
-| `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` | The reviewer model, passed to the provider |
-| `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent. `claude-code` is the only accepted value; any other is a usage error that lists the accepted ones |
+| `AGENT_REVIEW_MODEL` | `claude-sonnet-5-5` for `claude-code`, `gpt-6.1-sol` for `codex` | The reviewer model, passed to the provider |
+| `AGENT_REVIEW_PROVIDER` | `claude-code` | Which adapter runs the agent: `claude-code` (docs/providers/claude-code.md) or `codex` (docs/providers/codex.md). Any other value is a usage error that lists the accepted ones |
+| `AGENT_REVIEW_PRICE_PER_MTOK` | unset | `codex` only: `"input,cached_input,output"` in USD per million tokens, for a model without a built-in price |
+| `AGENT_REVIEW_REASONING_EFFORT` | unset | `codex` only: passed as `model_reasoning_effort` (for example `high`); unset keeps the model's default |
 | `AGENT_REVIEW_MENTION` | `@agent-review` | The keyword `comment` looks for. `@claude` always works as an alias |
 | `AGENT_REVIEW_OPERATOR` | unset | The login allowed to command the tool. `comment` requires it: empty, `your-github-login` and anything starting with `EDIT` are refused. The workflow checks it first; the CLI checks it again when the comment author is known (see below) |
 | `AGENT_REVIEW_EXCLUDE` | unset | Extra globs to drop, comma-separated, on top of lockfiles, build output and generated files. The reusable workflow has no input for it; it works only in the copy-the-files install |
@@ -150,8 +152,6 @@ The engine (`src/engine.ts`) is provider-neutral. It asks a `ProviderAdapter`
 duration and a terminal reason. Filtering, risk, batches, retries, coverage, budgets, posting and
 threads stay in the engine.
 
-Only the Claude Code adapter exists: [docs/providers/claude-code.md](providers/claude-code.md).
-A second adapter is added only when a consumer needs it or a measured comparison is wanted, and it
-must bring its own sandbox story (what the agent may read or run), its own structured-output path
-and its own cost accounting. There is no plugin system and no second provider planned. The
-interface is drawn from one example, so expect to redraw it when a second adapter does not fit.
+Two adapters exist: [Claude Code](providers/claude-code.md), the default, and
+[Codex](providers/codex.md) (ADR 0004). Each brings its own sandbox story (what the agent may read
+or run), its own structured-output path and its own cost accounting. There is no plugin system.

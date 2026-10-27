@@ -6,9 +6,9 @@
  * it inherits from the environment) belongs to the adapter and is documented per adapter in
  * `docs/providers/`.
  *
- * Non-goals: a plugin system, and a second provider before a consumer needs one. A second adapter
- * must bring its own sandbox story, its own structured-output path and its own cost accounting.
- * This shape is drawn from one example; if a second adapter does not fit, redraw it.
+ * Non-goal: a plugin system. Each adapter brings its own sandbox story, its own structured-output
+ * path and its own cost accounting. The shape was drawn from Claude Code and held for Codex
+ * (ADR 0004); if a third adapter does not fit, redraw it.
  */
 
 /** Tool names the engine may ask for. Each adapter maps them to its own names. */
