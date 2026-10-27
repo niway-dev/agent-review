@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/niway-dev/agent-review/compare/v1.1.0...v1.2.0) (2026-10-27)
+
+
+### Features
+
+* add a Codex provider for reviews by OpenAI models ([afb778d](https://github.com/niway-dev/agent-review/commit/afb778d00febcee5bead2806e16168ecd28f7341))
+* add a Codex provider for reviews by OpenAI models ([947d7d3](https://github.com/niway-dev/agent-review/commit/947d7d3a1f473646ba77d5421251012ff814cc27))
+* answer /wachi, a command that notifies no GitHub account ([89ec9f9](https://github.com/niway-dev/agent-review/commit/89ec9f904a20f945204fd774a2f59e2ecab0b1ee))
+* rename to Wachi Reviewer with a /wachi command that pings nobody ([315d915](https://github.com/niway-dev/agent-review/commit/315d9155d385550c0b2924e6aeb3ef5824fc6bbe))
+* require evidence before a finding is stated as a fix ([2c1f323](https://github.com/niway-dev/agent-review/commit/2c1f323dd2e2bccadea90b0796ca5aab17ffa439))
+* require evidence before a finding is stated as a fix ([ad29f24](https://github.com/niway-dev/agent-review/commit/ad29f2435f4201b0b679039f3d7cd4c44a728baf))
+
 ## [1.1.0](https://github.com/niway-dev/agent-review/compare/v1.0.0...v1.1.0) (2026-10-26)
 
 
