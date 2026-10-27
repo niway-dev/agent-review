@@ -71,13 +71,21 @@ All names are in `src/engine.ts` unless a file is given.
    batch's own file list, the line-number convention, the review instruction, the thread
    instruction when open threads exist, the label rules (`RULES`: each severity with the test a
    finding must pass, each topic, the combination rules, and the instruction not to report that a
-   decision record is edited, since the engine does that), the repository's focus file
+   decision record is edited, since the engine does that, and the evidence rules: cite the line
+   behind every premise of a "blocker" or "fix" or ask it as a "question", suggest a fix only for
+   the failure shown, search all callers of a shared contract, no escape clauses), the
+   repository's focus file
    (`repoFocus`, `.github/agent-review.md`) and last the diff. `annotateDiff` prefixes each diff
    line with its line number in the file at the head, so a finding's `line` is one GitHub can anchor
    a thread to. The prompt goes to the provider through stdin because a large diff would exceed
    the argument-length limit. It includes the no-rationing sentence: "You do not manage a budget:
    the harness that runs you enforces its own limits, so never shorten your reading to save
-   effort." *Why:* the model reasons about effort it cannot see; the harness owns the budget, so
+   effort." The review instruction also asks the model to read a file in full before reporting a
+   finding on it. *Why of the evidence rules:* in a real review the model stated a premise as fact
+   that a line outside the diff's hunks disproved, and extended a correct fix to a code path whose
+   comment said why it must not change; both cost the owner more than the extra reading costs.
+   Precision is measured from the owner's verdict replies (`docs/precision.md`). *Why of the
+   no-rationing sentence:* the model reasons about effort it cannot see; the harness owns the budget, so
    the model should not trade coverage for it.
 
 5. **The provider call.** `reviewBatch` writes `pr.json` and `threads.json` to a scratch directory

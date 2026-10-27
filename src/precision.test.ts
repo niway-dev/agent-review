@@ -1,0 +1,74 @@
+import { describe, expect, test } from "bun:test";
+import { judge, parseLabel, parseModel, parseVerdict, report, type RawComment } from "./precision";
+
+describe("parseLabel", () => {
+  test("reads the current two-axis label", () => {
+    expect(parseLabel("🟠🐛 **Fix · bug: Arrow-left lands on the wrong preset**\n\nbody")).toEqual({
+      severity: "fix",
+      topic: "bug",
+    });
+  });
+  test("reads the label used before v1.1.0", () => {
+    expect(parseLabel("**Note (other): Stale cell**")).toEqual({ severity: "note (old)", topic: "other" });
+    expect(parseLabel("**Should fix (correctness): x**")).toEqual({ severity: "should_fix (old)", topic: "correctness" });
+  });
+  test("ignores a comment that is not a finding", () => {
+    expect(parseLabel("Thanks, addressed.")).toBeNull();
+  });
+});
+
+describe("parseVerdict", () => {
+  // The four replies the owner wrote on kaipu-record pull request #384.
+  test("reads the owner's real verdicts", () => {
+    expect(parseVerdict("**Verdict: wrong (false positive).** `current` is never -1")).toBe("wrong");
+    expect(parseVerdict("**Verdict: correct.** Fixed in 4b37e3fe")).toBe("correct");
+    expect(parseVerdict("**Verdict: correct, and the gap is wider than reported.**")).toBe("correct");
+    expect(parseVerdict("**Verdict: correct for the timer, wrong for the early patch.**")).toBe("partial");
+    expect(
+      parseVerdict("**Verdict: correct.** Fixed in 4b37e3fe: `useSettingsFocus` keeps only the focus-contract half"),
+    ).toBe("correct");
+  });
+  test("reads the spellings the convention allows", () => {
+    expect(parseVerdict("Verdict: partially wrong")).toBe("partial");
+    expect(parseVerdict("verdict: incorrect")).toBe("wrong");
+  });
+  test("a reply without a verdict is not one", () => {
+    expect(parseVerdict("I think this is correct")).toBeNull();
+    expect(parseVerdict("Verdict: not sure yet")).toBeNull();
+  });
+});
+
+test("parseModel reads the review footer", () => {
+  expect(parseModel("…\n\n<sub>Claude Sonnet 5.5 via Claude Code 2.1.304 · $0.03</sub>")).toBe("Claude Sonnet 5.5");
+  expect(parseModel("no footer")).toBe("unknown");
+});
+
+describe("judge and report", () => {
+  const bot = { login: "github-actions[bot]" };
+  const owner = { login: "csdev19" };
+  const comments: RawComment[] = [
+    { id: 1, pull_request_review_id: 9, user: bot, body: "🟠🐛 **Fix · bug: a**" },
+    { id: 2, pull_request_review_id: 9, user: bot, body: "🟡📜 **Consider · rules: b**" },
+    { id: 3, pull_request_review_id: 9, user: bot, body: "🟡🧹 **Consider · cleanup: c**" },
+    { id: 4, in_reply_to_id: 1, user: owner, body: "**Verdict: wrong (false positive).**" },
+    { id: 5, in_reply_to_id: 2, user: owner, body: "**Verdict: correct.**" },
+    // A bot reply in its own thread is never read as a verdict.
+    { id: 6, in_reply_to_id: 3, user: bot, body: "Verdict: correct" },
+  ];
+  const rows = judge(comments, new Map([[9, "Claude Sonnet 5.5"]]));
+
+  test("pairs each finding with the owner's verdict and the review's model", () => {
+    expect(rows).toEqual([
+      { severity: "fix", topic: "bug", model: "Claude Sonnet 5.5", verdict: "wrong" },
+      { severity: "consider", topic: "rules", model: "Claude Sonnet 5.5", verdict: "correct" },
+      { severity: "consider", topic: "cleanup", model: "Claude Sonnet 5.5", verdict: "unjudged" },
+    ]);
+  });
+
+  test("precision counts only judged findings, a partial one as half", () => {
+    const text = report([...rows, { severity: "fix", topic: "bug", model: "m", verdict: "partial" }]);
+    expect(text).toContain("| fix | 2 | 0 | 1 | 1 | 0 | 25% |");
+    expect(text).toContain("| consider | 2 | 1 | 0 | 0 | 1 | 100% |");
+    expect(text).toContain("### By model");
+  });
+});

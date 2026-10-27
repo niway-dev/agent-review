@@ -662,6 +662,18 @@ in the review body. A "question" takes the severity of its worst plausible answe
 could make it a blocker, the question is a "blocker".
 Never report that the pull request edits a file in docs/adr/: the engine posts that notice itself.
 Report only code that contradicts an accepted decision record.
+Evidence, before any "blocker" or "fix":
+- Cite the file and line that establishes every premise your argument depends on, such as how a
+  value is computed or when a flag is set. If you have not read that line, read it. If you still
+  cannot cite it, the finding is a "question" at "consider" or higher, worded as a question to the
+  author, never a "fix" stated as fact.
+- Suggest a fix only for the failure you showed. Before extending it to another code path, read why
+  that path exists (its comments, its tests, the code that calls it) and say so; if you cannot, ask
+  about that path in a separate "question" instead of recommending the change.
+- When the finding is about a shared function's or component's contract or default, search for all
+  of its callers and state the real scope ("also the Mic and Audio tiles"), not only this file's.
+- No escape clauses such as "unless this is deliberate, in which case ignore". Check what you can
+  check; ask about what you cannot.
 Skip praise, style a formatter would catch, and speculation you cannot tie to the diff. Write in English.`;
 
 export const FOCUS_PATH = ".github/agent-review.md";
@@ -1064,9 +1076,10 @@ Each diff line starts with its line number in the file at the head commit (blank
 lines). Use that number as a finding's \`line\`, never a position in the diff.
 
 Review every file of this part, including tests, stylesheets, documentation and messages: a
-test that asserts the wrong thing or a doc that says something false is a finding. Read a
-changed file in full when a finding needs its surroundings, and read files of other parts or
-callers in the repository to confirm a finding that crosses them. Report findings only on this
+test that asserts the wrong thing or a doc that says something false is a finding. Before you
+report a finding on a file, read that file in full: the line that disproves a finding is often
+outside the diff's hunks. Read files of other parts or callers in the repository to confirm a
+finding that crosses them. Report findings only on this
 part's files. You do not manage a budget: the harness that runs you enforces its own limits, so
 never shorten your reading to save effort. A file you read and found nothing worth flagging in
 goes in files_reviewed.
