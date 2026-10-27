@@ -12,8 +12,10 @@ computed from their paths, riskiest first, and each batch is one agent call with
 money bounds the run rather than pull request size. If some files are not reviewed, the first
 line of the review says so.
 
-Today the only agent is [Claude Code](https://claude.com/claude-code) (`claude -p`), behind a
-small provider interface. The key stays in
+The default agent is [Claude Code](https://claude.com/claude-code) (`claude -p`); the Codex CLI
+(`codex exec`, for OpenAI models such as GPT Sol) is a second adapter behind the same small
+provider interface, available from the CLI while its workflow integration is pending
+([docs/providers/codex.md](docs/providers/codex.md)). The key stays in
 your repository's secrets, and nothing is sent to a service run by this project.
 
 ## Status

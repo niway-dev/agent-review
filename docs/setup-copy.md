@@ -132,7 +132,7 @@ The CLI needs Bun (the workflow pins 1.3.4) and nothing else from the repository
 
 ## Security model
 
-Claude Code (the only adapter) runs with `--restricted --strict-mcp-config --tools Read,Glob,Grep`
+Claude Code (the default adapter; Codex is documented in docs/providers/codex.md) runs with `--restricted --strict-mcp-config --tools Read,Glob,Grep`
 and the adapter's `--settings` file: no shell, no MCP servers, the head's user, project and local settings (its
 `.claude/` hooks included) ignored, no GitHub token in its environment, `/proc` denied to every
 read tool (unverified under `--restricted`), and `--max-budget-usd` per call. Whether the head's

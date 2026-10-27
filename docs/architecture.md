@@ -295,7 +295,7 @@ and the copy-the-files install. The two sets must stay equal.
   Issue [#9](https://github.com/niway-dev/agent-review/issues/9) (pin actions by SHA) is still
   open although the workflows are pinned on `main`.
 - The review is advisory and trusts everyone who can push to the repository.
-- Only Claude Code is implemented; the adapter interface has one example behind it.
+- Two adapters exist, Claude Code and Codex (ADR 0004). The reusable workflow installs only Claude Code so far.
 - Thread context is bounded: the first 100 review threads and 30 comments per thread.
 - The risk rules and `moduleKey` encode path conventions that fit some repository layouts
   (`apps/*/src`, `ipc`, `preload`, `main`) better than others.

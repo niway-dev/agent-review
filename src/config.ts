@@ -1,4 +1,5 @@
 /** The `AGENT_REVIEW_*` settings, read once, with the old `CLAUDE_REVIEW_*` names as a fallback. */
+import { DEFAULT_MODELS } from "./providers";
 
 export class UsageError extends Error {}
 
@@ -10,8 +11,13 @@ export interface EngineConfig {
   batchLines: number;
   batchChars: number;
   dryRun: boolean;
+  /** The provider's default (`DEFAULT_MODELS`) when unset. */
   model: string;
   provider: string;
+  /** `AGENT_REVIEW_PRICE_PER_MTOK`: "input,cached_input,output" USD per million tokens, for a Codex model without a built-in price. */
+  pricePerMTok?: string;
+  /** `AGENT_REVIEW_REASONING_EFFORT`: passed to Codex as `model_reasoning_effort`; unset keeps the model's default. */
+  reasoningEffort?: string;
   mention: string;
   /** Login allowed to command the tool. `comment` refuses to run when it is empty or a placeholder. */
   operator: string;
@@ -47,6 +53,7 @@ export function loadConfig(env: Env, warn: (line: string) => void = console.erro
     }
     return value;
   };
+  const provider = get("PROVIDER") ?? "claude-code";
   return {
     budgetUsd: number("BUDGET_USD", 3),
     batchBudgetUsd: number("BATCH_BUDGET_USD", 0.75),
@@ -54,8 +61,10 @@ export function loadConfig(env: Env, warn: (line: string) => void = console.erro
     batchLines: number("BATCH_LINES", 1000, true),
     batchChars: number("BATCH_CHARS", 140000, true),
     dryRun: get("DRY_RUN") === "1",
-    model: get("MODEL") ?? "claude-sonnet-5-5",
-    provider: get("PROVIDER") ?? "claude-code",
+    model: get("MODEL") ?? DEFAULT_MODELS[provider as keyof typeof DEFAULT_MODELS] ?? DEFAULT_MODELS["claude-code"],
+    provider,
+    pricePerMTok: get("PRICE_PER_MTOK"),
+    reasoningEffort: get("REASONING_EFFORT"),
     mention: get("MENTION") ?? "@agent-review",
     operator: get("OPERATOR") ?? "",
     exclude: (get("EXCLUDE") ?? "").split(",").filter(Boolean),
