@@ -843,6 +843,12 @@ describe("buildBatchPrompt", () => {
     for (const key of [...Object.keys(SEVERITY), ...Object.keys(TOPIC)])
       expect(RULES).toContain(`"${key}":`);
     expect(RULES).toContain("Never report that the pull request edits a file in docs/adr/");
+    // The evidence rules, each written after a false positive or an overreaching fix in a real review.
+    expect(RULES).toContain("Cite the file and line that establishes every premise");
+    expect(RULES).toContain("Suggest a fix only for the failure you showed");
+    expect(RULES).toContain("search for all\n  of its callers");
+    expect(RULES).toContain("No escape clauses");
+    expect(text).toContain("read that file in full");
     expect(RULES).not.toMatch(/should_fix|"note"|"other"|correctness/);
   });
 });
