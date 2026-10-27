@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * agent-review: advisory pull request reviews by an agent CLI.
+ * wachi: advisory pull request reviews by an agent CLI.
  *
- *   agent-review review <pr> [paths…]   review it; after the first review, only what changed
+ *   wachi review <pr> [paths…]   review it; after the first review, only what changed
  *                                       since the last reviewed commit
- *   agent-review comment <pr>           route the operator's comment, read from $REQUEST, to a
+ *   wachi comment <pr>           route the operator's comment, read from $REQUEST, to a
  *                                       review or an answer
  *
  * Exit codes: 0 posted or nothing to do; 1 engine error (nothing posted); 2 usage error.
@@ -17,9 +17,9 @@ import { comment, defaultGh, review, type Deps } from "./engine";
 import { getProvider, PROVIDER_NAMES, UnknownProviderError } from "./providers";
 
 export const USAGE = `Usage:
-  agent-review review <pr> [paths…] [--repo-dir <dir>]   Review a pull request (or only the given paths)
-  agent-review comment <pr> [--repo-dir <dir>]           Handle the comment in $REQUEST (a review or an answer)
-  agent-review --help | --version
+  wachi review <pr> [paths…] [--repo-dir <dir>]   Review a pull request (or only the given paths)
+  wachi comment <pr> [--repo-dir <dir>]           Handle the comment in $REQUEST (a review or an answer)
+  wachi --help | --version
 
 Options:
   --repo-dir <dir>                   The checked-out pull request head: every file the engine reads
@@ -39,7 +39,7 @@ export function readVersion(dir = import.meta.dir) {
     const path = join(dir, "..", "package.json");
     if (!existsSync(path)) return "unknown";
     const pkg = JSON.parse(readFileSync(path, "utf8"));
-    return pkg.name === "agent-review" ? String(pkg.version) : "unknown";
+    return pkg.name === "wachi-code-reviewer" ? String(pkg.version) : "unknown";
   } catch {
     return "unknown";
   }
@@ -115,7 +115,7 @@ export function main(argv: string[], env: Record<string, string | undefined>): n
     try {
       provider.preflight();
     } catch (error) {
-      console.error(`agent-review: ${error instanceof Error ? error.message : error}`);
+      console.error(`wachi: ${error instanceof Error ? error.message : error}`);
       return 1;
     }
     if (mode === "review") review(deps, repo, pr, rest);
@@ -123,10 +123,10 @@ export function main(argv: string[], env: Record<string, string | undefined>): n
     return 0;
   } catch (error) {
     if (error instanceof UsageError || error instanceof UnknownProviderError) {
-      console.error(`agent-review: ${error.message}\n\n${USAGE}`);
+      console.error(`wachi: ${error.message}\n\n${USAGE}`);
       return 2;
     }
-    console.error(`agent-review: ${error instanceof Error ? error.message : error}`);
+    console.error(`wachi: ${error instanceof Error ? error.message : error}`);
     return 1;
   }
 }

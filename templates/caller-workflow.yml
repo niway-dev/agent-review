@@ -1,4 +1,4 @@
-name: Agent review
+name: Wachi review
 
 # An advisory code review by an agent CLI (today Claude Code), paid from the Anthropic Console
 # API credits through the `ANTHROPIC_API_KEY` secret. It is a GitHub review: each finding is a comment on its
@@ -7,24 +7,24 @@ name: Agent review
 # advisory: never a required check, never an approval or a change request, never a merge
 # gate. What to look for beyond the defaults is in `.github/agent-review.md`.
 #
-# The "copy the files" workflow template. Copy it with the `src/` folder of agent-review
-# (as `scripts/agent-review/`, see docs/setup-copy.md), record the decision in the repository's ADRs, and edit the
+# The "copy the files" workflow template. Copy it with the `src/` folder of Wachi Code Reviewer
+# (as `scripts/wachi/`, see docs/setup-copy.md), record the decision in the repository's ADRs, and edit the
 # trust paragraph below to say who can push. It runs narrowly:
 #   - `review`: once, when a pull request opens ready for review or leaves draft.
 #     A later push does not re-run it.
 #   - `on-demand`: when the repository owner comments on a pull request:
-#     `@agent-review review` re-reviews what changed since the last reviewed commit and
-#     answers the owner's replies in the open threads; `@agent-review review <path>…` reviews
-#     only those paths; any other `@agent-review …` comment is a question, answered as a comment.
+#     `@wachi review` re-reviews what changed since the last reviewed commit and
+#     answers the owner's replies in the open threads; `@wachi review <path>…` reviews
+#     only those paths; any other `@wachi …` comment is a question, answered as a comment.
 #
 # Limit of this install: the copied engine lives in the consumer repository itself, so engine and
 # reviewed head cannot be fully separated here (on `pull_request` the engine is the pull request's
 # own copy, and the checkout is the process's working directory). The reusable workflow
-# (templates/agent-review-caller.yml) checks them out as siblings and is preferred. This copy
-# still runs `bun --no-env-file --config=scripts/agent-review/bunfig.toml ... --repo-dir .`, so
+# (templates/wachi-caller.yml) checks them out as siblings and is preferred. This copy
+# still runs `bun --no-env-file --config=scripts/wachi/bunfig.toml ... --repo-dir .`, so
 # Bun reads no `bunfig.toml` or `.env` from the head; copy `bunfig.toml` next to `cli.ts`.
 #
-# Before the agent is called, `scripts/agent-review/cli.ts` drops lockfiles, build output and
+# Before the agent is called, `scripts/wachi/cli.ts` drops lockfiles, build output and
 # generated files, then packs the rest into batches of about 1,000 changed lines, riskiest
 # first, one agent call each with its diff inside the prompt. A batch that leaves files
 # unaccounted for is re-run once with only those files. There is no size gate: the budget
@@ -34,13 +34,13 @@ name: Agent review
 # Comments come from `github-actions[bot]` through the workflow token, so no GitHub
 # App needs to be installed.
 #
-# Both jobs run `scripts/agent-review/cli.ts`: the agent only reads (files, the PR, its diff),
+# Both jobs run `scripts/wachi/cli.ts`: the agent only reads (files, the PR, its diff),
 # and the CLI posts the review, capped by the budgets below. That is enough
 # here because only the owner pushes (EDIT THIS: say who can open pull requests in this
 # repository), so everything the agent reads is trusted. A public repository needs more
 # before copying this file: prompt injection and outside contributors. Three things
 # already keep strangers out: fork pull requests are skipped (they get no secrets anyway),
-# only the operator's `@agent-review` comment starts a run, and only replies from people with
+# only the operator's `@wachi` comment starts a run, and only replies from people with
 # access reach the agent. Claude Code runs with `--restricted --strict-mcp-config
 # --tools Read,Glob,Grep --settings claude-code.settings.json` (docs/providers/claude-code.md):
 # the head's user, project and local settings (its `.claude/` hooks included) are ignored,
@@ -54,7 +54,7 @@ on:
     types: [opened, ready_for_review]
   # GitHub runs `issue_comment` workflows from the default branch's copy of this file. The
   # pull request that installs the workflow therefore gets only the `pull_request` review;
-  # `@agent-review review` and thread replies start working once the file is on the default branch.
+  # `@wachi review` and thread replies start working once the file is on the default branch.
   issue_comment:
     types: [created]
 
@@ -69,7 +69,7 @@ env:
   # Pinned: the version is part of what was verified to work (see above). Bump it by
   # hand, and re-run a review to check.
   CLAUDE_CODE_VERSION: 2.1.304
-  # Batch size, and the most one batch, one pull request and one `@agent-review` question may
+  # Batch size, and the most one batch, one pull request and one `@wachi` question may
   # spend. Past the pull request's budget the remaining batches are listed as not reviewed.
   # A pull request edits these for its own `review` run, which the trust assumption above
   # accepts.
@@ -83,7 +83,7 @@ env:
 
 jobs:
   review:
-    name: Agent review
+    name: Wachi review
     # Fork and Dependabot pull requests get no secrets, so the job could only fail there.
     # Release-please pull requests are a changelog and a version bump; reviewing them would
     # only spend.
@@ -120,7 +120,7 @@ jobs:
           # Optional: pin the binary's SHA-256 yourself. Empty means the publisher's manifest.
           CLAUDE_CODE_SHA256: ""
         run: |
-          bash scripts/agent-review/install-claude-code.sh
+          bash scripts/wachi/install-claude-code.sh
           echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       - name: Review the pull request
@@ -130,21 +130,22 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         # `--config=<path>` needs the equals sign: `-c <path>` did not replace the head's config
         # in Bun 1.3.4. `--no-env-file` keeps the head's `.env` out of this process.
-        run: bun --no-env-file --config=scripts/agent-review/bunfig.toml scripts/agent-review/cli.ts review "$PR" --repo-dir .
+        run: bun --no-env-file --config=scripts/wachi/bunfig.toml scripts/wachi/cli.ts review "$PR" --repo-dir .
 
   on-demand:
-    name: Agent on demand
+    name: Wachi on demand
     # EDIT THIS: replace 'your-github-login' below with the operator's login, and keep it equal
     # to AGENT_REVIEW_OPERATOR above (a job `if:` cannot read `env`). Matching by login works
     # for user-owned and organisation-owned repositories alike (`author_association` is `OWNER`
-    # in the first and `MEMBER` in the second). `@claude` is accepted as an alias while
+    # in the first and `MEMBER` in the second). `@claude` and `@agent-review` are accepted as aliases while
     # installed copies migrate.
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       github.event.comment.user.login == 'your-github-login' &&
-      (contains(github.event.comment.body, '@agent-review') ||
-       contains(github.event.comment.body, '@claude'))
+      (contains(github.event.comment.body, '@wachi') ||
+       contains(github.event.comment.body, '@claude') ||
+       contains(github.event.comment.body, '@agent-review'))
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another
     concurrency:
@@ -181,7 +182,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: .ci-main
-          sparse-checkout: scripts/agent-review
+          sparse-checkout: scripts/wachi
           fetch-depth: 1
 
       - name: Setup Bun
@@ -195,7 +196,7 @@ jobs:
           # Optional: pin the binary's SHA-256 yourself. Empty means the publisher's manifest.
           CLAUDE_CODE_SHA256: ""
         run: |
-          bash .ci-main/scripts/agent-review/install-claude-code.sh
+          bash .ci-main/scripts/wachi/install-claude-code.sh
           echo "$CLAUDE_INSTALL_DIR" >> "$GITHUB_PATH"
 
       # The comment reaches the CLI through the environment, never interpolated
@@ -207,4 +208,4 @@ jobs:
           PR: ${{ github.event.issue.number }}
           REQUEST: ${{ github.event.comment.body }}
           AGENT_REVIEW_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
-        run: bun --no-env-file --config=.ci-main/scripts/agent-review/bunfig.toml .ci-main/scripts/agent-review/cli.ts comment "$PR" --repo-dir .
+        run: bun --no-env-file --config=.ci-main/scripts/wachi/bunfig.toml .ci-main/scripts/wachi/cli.ts comment "$PR" --repo-dir .

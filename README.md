@@ -1,7 +1,12 @@
-# agent-review
+# Wachi Code Reviewer
 
-Advisory pull request reviews by an agent CLI, run inside your own GitHub Actions with your own
-API key.
+An open-source AI code reviewer for GitHub Actions. Reads your diffs, project rules, and
+architecture decisions. Bring your own API key.
+
+Wachi gives advisory pull request reviews by an agent CLI, run inside your own GitHub Actions
+with your own API key. Reviews are signed `Wachi by NIWAY`, and you ask for one with
+`@wachi review`. The project was called `agent-review` before this rename: see
+[Renamed from agent-review](#renamed-from-agent-review).
 
 Each finding arrives as an inline review comment on its line, labelled with a severity (when to
 act: Blocker, Fix, Consider) and a topic (what it is about: bug, docs, security…), for example
@@ -28,6 +33,20 @@ Until `v1.0.0` is cut, the CLI contract may still change; the old `CLAUDE_REVIEW
 the `<!-- claude-review sha=… -->` marker, `.github/claude-review.md` and the `@claude` mention
 keep working, with a notice, so older installed copies can migrate gradually.
 
+## Renamed from agent-review
+
+The product is now Wachi, and the repository is `niway-dev/wachi-code-reviewer` (GitHub redirects
+the old `niway-dev/agent-review` URL, including `uses:` lines). Only the branding changed; what
+installed copies depend on did not:
+
+- The `inputs:` and `secrets:` of the reusable workflow, and every `AGENT_REVIEW_*` variable, keep
+  their names.
+- `@agent-review` and `@claude` still start a run, next to the new default `@wachi`.
+- The `<!-- agent-review sha=… -->` marker and the older `claude-review` marker are still
+  recognised, so a pull request already reviewed is re-reviewed incrementally, not from scratch.
+- `.github/agent-review.md` is still the focus file, and the `agent-review` command is an alias
+  of `wachi`.
+
 ## Install
 
 There are three ways. The first two work today; the third is deferred.
@@ -36,7 +55,7 @@ There are three ways. The first two work today; the third is deferred.
    calls a reusable workflow here. You choose the triggers, the secret and the permission
    ceiling; fixes arrive through a version tag.
 2. **Copy the files.** Copy the `src/` folder and the workflow template into
-   your repository and run `bun scripts/agent-review/cli.ts`. See
+   your repository and run `bun scripts/wachi/cli.ts`. See
    [docs/setup-copy.md](docs/setup-copy.md).
 3. **npm (later).** `package.json` already has a `bin` entry, so publishing is a step and not a
    restructure, but it is deferred until the contract is stable.
@@ -58,16 +77,16 @@ request brings each new release to your repository for you to read before it run
 `v1` tag exists but is not recommended: it would run every new release with your key before you
 have seen it. See [docs/install.md](docs/install.md).
 
-Add this file as `.github/workflows/agent-review.yml`, save `ANTHROPIC_API_KEY` as a repository
+Add this file as `.github/workflows/wachi.yml`, save `ANTHROPIC_API_KEY` as a repository
 secret and set your login as `operator`:
 
 ```yaml
-name: Agent review
+name: Wachi review
 # Get the key at https://console.anthropic.com and save it as the repository secret ANTHROPIC_API_KEY.
 # Pin an exact release tag (`@v1.0.0`): it never moves, every update arrives as a Dependabot pull
 # request you read first, and a bad release is undone by editing the tag back. Do not use the floating
 # `@v1`: it would run each new release with your key before you have seen it.
-# First install: the installing pull request gets only the automatic review. `@agent-review review`
+# First install: the installing pull request gets only the automatic review. `@wachi review`
 # and thread replies work from the next pull request, because `issue_comment` runs from the default branch.
 on:
   pull_request: { types: [opened, ready_for_review] }
@@ -75,7 +94,7 @@ on:
 permissions: { contents: read, pull-requests: write, issues: read }
 jobs:
   review:
-    uses: niway-dev/agent-review/.github/workflows/review.yml@v1.0.0
+    uses: niway-dev/wachi-code-reviewer/.github/workflows/review.yml@v1.0.0
     with:
       operator: EDIT-THIS-github-login
     secrets:

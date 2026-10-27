@@ -150,7 +150,7 @@ describe("the batch loop against a fake provider", () => {
     expect(body).toContain("**Batch 1 of 2.** Manager looks mostly fine.");
     expect(body).toContain("**Batch 2 of 2.** Guide fine.");
     // Total spent is 0.30 + 0.10 + 0.20, in the footer built from the provider's label.
-    expect(body).toContain("<sub>Fake Model 1 via Fake CLI 0.1 · 2 batches · $0.60</sub>");
+    expect(body).toContain("<sub>Fake Model 1 via Fake CLI 0.1 · 2 batches · $0.60 · Wachi by NIWAY</sub>");
     expect(posted.review?.comments).toHaveLength(1);
     expect(posted.review?.comments[0]).toMatchObject({ path: MANAGER, line: 2 });
   });
@@ -260,7 +260,7 @@ describe("comment", () => {
       log: () => {},
       warn: () => {},
     };
-    comment(deps, "o/r", 7, "@agent-review review", "stranger");
+    comment(deps, "o/r", 7, "@wachi review", "stranger");
     comment(deps, "o/r", 7, "no mention here", "boss");
     expect(provider.requests).toHaveLength(0);
   });
@@ -307,7 +307,7 @@ describe("comment with an operator that is not a real login", () => {
   for (const operator of ["", "   ", "EDIT-THIS-github-login", "your-github-login", "Your-GitHub-Login", "EDIT-ME", "edit"]) {
     test(`refuses "${operator}" before reading the comment or calling anything`, () => {
       const { deps, provider } = depsFor(operator);
-      expect(() => comment(deps, "o/r", 7, "@agent-review review", "someone")).toThrow(/operator login/);
+      expect(() => comment(deps, "o/r", 7, "@wachi review", "someone")).toThrow(/operator login/);
       expect(provider.requests).toHaveLength(0);
     });
   }

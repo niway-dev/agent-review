@@ -16,9 +16,9 @@ It is meant for repositories whose pushers you trust, not for untrusted or fork 
 | When | What happens | Cost |
 | --- | --- | --- |
 | A pull request opens ready for review, or leaves draft | Full review in batches; afterwards, only what changed since the last reviewed commit | $0.05–0.16 measured for one batch in v1; a large pull request costs several batches, at most `AGENT_REVIEW_BUDGET_USD` ($3) in total |
-| The operator comments `@agent-review review` | Review of what changed since the last reviewed commit; the agent answers the operator's replies in its open threads | ~$0.05 measured |
-| `@agent-review review <path>…` | Review of those paths only; words that name no changed file are ignored | — |
-| Any other `@agent-review …` by the operator | The question is answered as a comment | at most `AGENT_REVIEW_ANSWER_BUDGET_USD` ($1) |
+| The operator comments `@wachi review` | Review of what changed since the last reviewed commit; the agent answers the operator's replies in its open threads | ~$0.05 measured |
+| `@wachi review <path>…` | Review of those paths only; words that name no changed file are ignored | — |
+| Any other `@wachi …` by the operator | The question is answered as a comment | at most `AGENT_REVIEW_ANSWER_BUDGET_USD` ($1) |
 | A batch hits its cap, or the pull request budget is spent | The review posts what ran; batches that did not run are listed as not reviewed and their files make it "partial" | at most $3 (soft cap) |
 
 Skipped: drafts, fork pull requests, Dependabot and `release-please--*` branches. Lockfiles, build
@@ -59,7 +59,7 @@ the Coverage by batch table)".
   (`reviewed`, `reviewed after a retry`, `ran out of its budget`, `not run: budget spent`, …),
   turns and cost; the footer shows the model, the number of batches and the total cost. The
   `<!-- agent-review sha=… -->` marker (the old `<!-- claude-review sha=… -->` is still read) is written only when every kept file is accounted for.
-- **Dry run.** `AGENT_REVIEW_DRY_RUN=1 GH_TOKEN=… GITHUB_REPOSITORY=… bun scripts/agent-review/cli.ts
+- **Dry run.** `AGENT_REVIEW_DRY_RUN=1 GH_TOKEN=… GITHUB_REPOSITORY=… bun scripts/wachi/cli.ts
   review <pr>` reads GitHub but prints the review and replies instead of posting them. It still
   calls the agent, with whatever login the machine has, so it costs money; it does not print the
   batches and prompts without calling Claude.
@@ -78,9 +78,9 @@ prompts without calling Claude.
 
 | Copy to | From |
 | --- | --- |
-| `scripts/agent-review/` | The whole `src/` folder of this repository: `cli.ts`, `engine.ts`, `config.ts` and `providers/` (including `providers/claude-code.settings.json`, which the adapter looks for next to itself and refuses to run without). Leave out the `*.test.ts` files, or keep them and run them with `bun test ./scripts/agent-review` |
-| `scripts/agent-review/bunfig.toml` | The `bunfig.toml` at the root of this repository. The workflow passes it with `--config=` so Bun reads no `bunfig.toml` from the pull request's checkout |
-| `.github/workflows/agent-review.yml` | `templates/caller-workflow.yml`: edit its trust paragraph, the operator login (twice) and the other `EDIT THIS` markers |
+| `scripts/wachi/` | The whole `src/` folder of this repository: `cli.ts`, `engine.ts`, `config.ts` and `providers/` (including `providers/claude-code.settings.json`, which the adapter looks for next to itself and refuses to run without). Leave out the `*.test.ts` files, or keep them and run them with `bun test ./scripts/wachi` |
+| `scripts/wachi/bunfig.toml` | The `bunfig.toml` at the root of this repository. The workflow passes it with `--config=` so Bun reads no `bunfig.toml` from the pull request's checkout |
+| `.github/workflows/wachi.yml` | `templates/caller-workflow.yml`: edit its trust paragraph, the operator login (twice) and the other `EDIT THIS` markers |
 | `.github/agent-review.md` | Write it: the repository's review focus, as a short list. Optional |
 
 The CLI contract (commands, environment, exit codes) is in [cli.md](cli.md); the Claude Code
@@ -100,15 +100,15 @@ The CLI needs Bun (the workflow pins 1.3.4) and nothing else from the repository
    ```
    In the web UI: Settings → Secrets and variables → Actions → **Repository secrets** → New
    repository secret.
-3. **Copy the files** above. Run `bun --no-env-file --config=scripts/agent-review/bunfig.toml scripts/agent-review/cli.ts --help` once to check the copy.
+3. **Copy the files** above. Run `bun --no-env-file --config=scripts/wachi/bunfig.toml scripts/wachi/cli.ts --help` once to check the copy.
 4. **Write `.github/agent-review.md`**: the rules a reviewer of this repository must know, taken
    from its `CLAUDE.md`, not invented.
 5. **Open the pull request that adds the kit, ready for review.** A `pull_request` workflow runs
-   from the pull request's own branch, so it reviews itself. The `@agent-review` job runs from the
+   from the pull request's own branch, so it reviews itself. The `@wachi` job runs from the
    default branch, so it can only be tried after the merge. **First-install limitation** (seen in a
    real setup): GitHub runs `issue_comment` workflows from the default
    branch's copy of the file, so the pull request that installs the kit only gets the automatic
-   review on open/ready. `@agent-review review` and thread replies work from the next pull request, once
+   review on open/ready. `@wachi review` and thread replies work from the next pull request, once
    the workflow is on the default branch.
 
 ## Things that will surprise you
@@ -117,12 +117,12 @@ The CLI needs Bun (the workflow pins 1.3.4) and nothing else from the repository
   same key, version and runner worked. The tool calls `claude -p` directly. If you try the action,
   its errors are hidden unless `show_full_output: true`, which prints every tool result.
 - **A pull request opened before the workflow reached the default branch gets no review.** Comment
-  `@agent-review review` on it.
+  `@wachi review` on it.
 - **Re-running a review on purpose**: toggle the pull request to draft and back
-  (`gh pr ready <n> --undo && gh pr ready <n>`), or comment `@agent-review review`. Each toggle shows up
+  (`gh pr ready <n> --undo && gh pr ready <n>`), or comment `@wachi review`. Each toggle shows up
   as a `ready_for_review` run in the Actions list.
 - **Every comment on a pull request starts a workflow run**, skipped unless it is the operator's
-  `@agent-review` (or the `@claude` alias). Concurrency is per job for that reason: a workflow-level group lets a skipped run
+  `@wachi` (or its `@agent-review` and `@claude` aliases). Concurrency is per job for that reason: a workflow-level group lets a skipped run
   cancel a review.
 - **`gh --jq` prints string results raw**, like `jq -r`. The script relies on it.
 - **Line numbers**: the agent reads a diff whose lines carry their number in the file at the head.
@@ -138,7 +138,7 @@ and the adapter's `--settings` file: no shell, no MCP servers, the head's user, 
 read tool (unverified under `--restricted`), and `--max-budget-usd` per call. Whether the head's
 `CLAUDE.md` still loads as memory under `--restricted` is unverified. The CLI holds the tokens, posts the
 review, and posts nothing at all if any text it would post contains the key. On a public repository, only replies by
-`OWNER`, `MEMBER` or `COLLABORATOR` reach the agent, and only the operator's `@agent-review` (or `@claude`) starts a run.
+`OWNER`, `MEMBER` or `COLLABORATOR` reach the agent, and only the operator's `@wachi` (or `@agent-review` or `@claude`) starts a run.
 
 **This is not a sandbox.** Managed settings still apply, and an encoded key would pass the output
 check. The tool is safe only when

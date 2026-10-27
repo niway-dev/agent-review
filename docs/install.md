@@ -12,21 +12,20 @@ permission ceiling; the reusable workflow in this repository runs the engine.
 ## Three steps
 
 1. **Add the caller file.** Copy
-   [`templates/agent-review-caller.yml`](../templates/agent-review-caller.yml) to
-   `.github/workflows/agent-review.yml`. Its `uses:` line names the latest exact release tag;
-   check the [releases](https://github.com/niway-dev/agent-review/releases) if you want another.
+   [`templates/wachi-caller.yml`](../templates/wachi-caller.yml) to
+   `.github/workflows/wachi.yml`. Its `uses:` line names the latest exact release tag;
+   check the [releases](https://github.com/niway-dev/wachi-code-reviewer/releases) if you want another.
 2. **Add the secret.** Create an Anthropic API key at <https://console.anthropic.com> and save it
    as the repository secret `ANTHROPIC_API_KEY` (Settings, Secrets and variables, Actions).
 3. **Set the operator.** Replace `operator: EDIT-THIS-github-login` with the GitHub login of the
-   one person who may start reviews by comment. Only that login's `@agent-review` (or
-   `@claude`) comments start a run.
+   one person who may start reviews by comment. Only that login's `@wachi` (or its `@agent-review` and `@claude` aliases) comments start a run.
    The jobs fail with a clear error while `operator` is empty or still a placeholder
    (`EDIT…`, `your-github-login`), because anyone could register a placeholder login.
 
 Open a pull request. The automatic review runs when it opens or leaves draft.
 
 **First install:** the pull request that adds the caller file only gets the automatic review.
-`@agent-review review` and replies in review threads start working from the next pull request,
+`@wachi review` and replies in review threads start working from the next pull request,
 because GitHub runs `issue_comment` workflows from the default branch.
 
 ## Optional: a focus file
@@ -43,7 +42,7 @@ The reusable workflow takes these `with:` inputs. Only `operator` is required.
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `operator` | none | Login allowed to start on-demand runs |
-| `mention` | `@agent-review` | Mention that starts a run (`@claude` is also accepted) |
+| `mention` | `@wachi` | Mention that starts a run (`@claude` and `@agent-review` are also accepted) |
 | `budget_usd` | `3` | Most one pull request review may spend |
 | `batch_budget_usd` | `0.75` | Most one batch may spend |
 | `answer_budget_usd` | `1` | Most one on-demand question may spend |

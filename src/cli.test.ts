@@ -16,7 +16,7 @@ describe("cli", () => {
   test("--help prints the usage and exits 0", () => {
     const out = run(["--help"]);
     expect(out.code).toBe(0);
-    expect(out.stdout).toContain("agent-review review <pr>");
+    expect(out.stdout).toContain("wachi review <pr>");
   });
 
   test("--version prints the package version", () => {

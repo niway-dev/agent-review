@@ -1,7 +1,7 @@
-name: Agent review (reusable)
+name: Wachi Code Reviewer (reusable)
 
 # Reusable workflow: an advisory review of a pull request, paid from the caller's own API key.
-# Call it from a short caller file (templates/agent-review-caller.yml); see docs/install.md.
+# Call it from a short caller file (templates/wachi-caller.yml); see docs/install.md.
 # The review is never a required check, an approval, a change request or a merge gate.
 #
 # What the consumer must trust (see SECURITY.md and docs/adr/0001-distribution-and-trust.md):
@@ -36,9 +36,9 @@ on:
         type: string
         required: true
       mention:
-        description: Mention that starts an on-demand run (`@claude` is always accepted too)
+        description: Mention that starts an on-demand run (`@claude` and `@agent-review` are always accepted too)
         type: string
-        default: "@agent-review"
+        default: "@wachi"
       budget_usd:
         description: Most one pull request review may spend, in USD
         type: number
@@ -95,7 +95,7 @@ on:
 
 jobs:
   review:
-    name: Agent review
+    name: Wachi review
     # Fork and Dependabot pull requests get no secrets, so the job could only fail there.
     # The skipped branch prefixes are checked in the first step (a prefix list cannot be
     # matched in an expression).
@@ -218,7 +218,7 @@ jobs:
         run: bun --no-env-file --config=bunfig.toml src/cli.ts review "$PR" --repo-dir "$GITHUB_WORKSPACE/head"
 
   on-demand:
-    name: Agent on demand
+    name: Wachi on demand
     # Only the operator's login starts a run: `author_association` is `OWNER` for a
     # user-owned repository but `MEMBER` in an organisation, so the login is compared.
     if: |
@@ -226,7 +226,8 @@ jobs:
       github.event.issue.pull_request &&
       github.event.comment.user.login == inputs.operator &&
       (contains(github.event.comment.body, inputs.mention) ||
-       contains(github.event.comment.body, '@claude'))
+       contains(github.event.comment.body, '@claude') ||
+       contains(github.event.comment.body, '@agent-review'))
     runs-on: ubuntu-latest
     timeout-minutes: 30 # batches run one after another
     concurrency:

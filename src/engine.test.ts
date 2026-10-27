@@ -54,8 +54,8 @@ const output = (over: Partial<ReviewOutput> = {}): ReviewOutput => ({
 
 describe("parseCommand", () => {
   test("reads a review request, with or without paths", () => {
-    expect(parseCommand("@agent-review review")).toEqual({ kind: "review", paths: [] });
-    expect(parseCommand("@agent-review review apps/api/src/main docs/")).toEqual({
+    expect(parseCommand("@wachi review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@wachi review apps/api/src/main docs/")).toEqual({
       kind: "review",
       paths: ["apps/api/src/main", "docs/"],
     });
@@ -67,32 +67,40 @@ describe("parseCommand", () => {
     expect(parseCommand("@claude why is this async?")).toEqual({ kind: "answer" });
   });
 
+  test("accepts @agent-review, the mention before the rename to Wachi", () => {
+    expect(parseCommand("@agent-review review")).toEqual({ kind: "review", paths: [] });
+    expect(parseCommand("@agent-review review docs/")).toEqual({ kind: "review", paths: ["docs/"] });
+    expect(parseCommand("@agent-review why?")).toEqual({ kind: "answer" });
+    expect(parseCommand("@agent-reviewer review")).toBeNull();
+    expect(parseCommand("@agent-review review", "@reviewer")).toEqual({ kind: "review", paths: [] });
+  });
+
   test("uses the configured keyword, and still accepts the alias", () => {
     expect(parseCommand("@reviewer review src/", "@reviewer")).toEqual({
       kind: "review",
       paths: ["src/"],
     });
     expect(parseCommand("@claude review", "@reviewer")).toEqual({ kind: "review", paths: [] });
-    expect(parseCommand("@agent-review review", "@reviewer")).toBeNull();
+    expect(parseCommand("@wachi review", "@reviewer")).toBeNull();
     // Regex characters in a keyword are literal.
     expect(parseCommand("@a.b review", "@a.b")).toEqual({ kind: "review", paths: [] });
     expect(parseCommand("@aXb review", "@a.b")).toBeNull();
   });
 
   test("reads only the first line, so a trailing sentence is not a path", () => {
-    expect(parseCommand("@agent-review review again\n\nthanks")).toEqual({
+    expect(parseCommand("@wachi review again\n\nthanks")).toEqual({
       kind: "review",
       paths: ["again"],
     });
   });
 
   test("treats any other mention as a question", () => {
-    expect(parseCommand("@agent-review why is this async?")).toEqual({ kind: "answer" });
+    expect(parseCommand("@wachi why is this async?")).toEqual({ kind: "answer" });
   });
 
   test("ignores comments that do not mention the tool", () => {
     expect(parseCommand("looks good, thanks")).toBeNull();
-    expect(parseCommand("@agent-reviewer review")).toBeNull();
+    expect(parseCommand("@wachi-reviewer review")).toBeNull();
   });
 });
 
@@ -169,7 +177,7 @@ describe("fileKind", () => {
 describe("riskScore", () => {
   test("ranks process boundaries and CI above ordinary code, and tests and docs last", () => {
     const ipc = riskScore("apps/api/src/main/ipc/settings.ipc.ts");
-    const workflow = riskScore(".github/workflows/agent-review.yml");
+    const workflow = riskScore(".github/workflows/wachi.yml");
     const main = riskScore("apps/api/src/main/session/session-manager.ts");
     const renderer = riskScore("apps/api/src/renderer/src/features/widget/widget.tsx");
     const test = riskScore("apps/api/src/main/ipc/settings.ipc.test.ts");
@@ -184,7 +192,7 @@ describe("riskScore", () => {
   test("ranks scripts, shell, infrastructure and database code above ordinary code", () => {
     const ordinary = riskScore("src/features/widget.ts");
     for (const path of [
-      "scripts/agent-review.ts",
+      "scripts/wachi.ts",
       "tools/deploy.sh",
       "infra/stack.ts",
       "services/api/db/client.ts",
@@ -192,7 +200,7 @@ describe("riskScore", () => {
       expect(riskScore(path)).toBeGreaterThan(ordinary);
     }
     // A test under scripts/ is still a test, whatever its path.
-    expect(riskScore("scripts/agent-review.test.ts")).toBe(riskScore("src/a.test.ts"));
+    expect(riskScore("scripts/wachi.test.ts")).toBe(riskScore("src/a.test.ts"));
   });
 });
 
@@ -534,7 +542,7 @@ describe("commentableLines", () => {
 });
 
 describe("marker", () => {
-  test("writes the agent-review marker and reads it back", () => {
+  test("writes the wachi marker and reads it back", () => {
     expect(marker("abc123")).toBe("<!-- agent-review sha=abc123 -->");
     expect(readMarker(`text\n${marker("abc123")}\n`)).toBe("abc123");
   });
@@ -709,7 +717,7 @@ describe("buildReview", () => {
     });
     expect(review.body).toContain("<summary>Coverage by batch</summary>");
     expect(review.body).toContain("| Batch 1 of 2 | 1 | 2 | 8 | reviewed | 9 | $0.30 |");
-    expect(review.body).toContain("<sub>Test Model 1 via Test CLI 0.1 · 2 batches · $0.07</sub>");
+    expect(review.body).toContain("<sub>Test Model 1 via Test CLI 0.1 · 2 batches · $0.07 · Wachi by NIWAY</sub>");
   });
 
   test("says what an incremental review covers", () => {

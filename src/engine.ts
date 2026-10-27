@@ -126,7 +126,9 @@ export const DEFAULT_EXCLUDE = [
   "**/worker-configuration.d.ts",
 ];
 
-// The old marker is still read so repositories reviewed before the rename keep their incremental state.
+// The marker keeps its original `agent-review` text on purpose (a rename would orphan every review
+// already posted); the older `claude-review` marker is still read too, so repositories reviewed
+// before either rename keep their incremental state.
 const MARKER = /<!-- (?:agent-review|claude-review) sha=([A-Za-z0-9]+) -->/;
 const short = (sha: string) => sha.slice(0, 7);
 /** `🟠📝 **Fix · docs: stale cell**`: both emojis, then the severity, topic and title in words. */
@@ -134,13 +136,19 @@ export const label = (f: Finding) =>
   `${SEVERITY[f.severity].emoji}${TOPIC[f.topic].emoji} **${SEVERITY[f.severity].word} · ${TOPIC[f.topic].word}: ${f.title}**`;
 const at = (f: { path: string; line: number }) => (f.line > 0 ? `${f.path}:${f.line}` : f.path);
 
-/** The mention that always works besides the configured keyword, during the migration. */
-export const MENTION_ALIAS = "@claude";
+/** The signature at the end of every comment the tool posts. */
+export const SIGNATURE = "Wachi by NIWAY";
+
+/**
+ * Mentions that always work besides the configured keyword, so installed copies and habits keep
+ * working: `@agent-review` was the default before the rename to Wachi, `@claude` the one before that.
+ */
+export const MENTION_ALIASES = ["@claude", "@agent-review"];
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function parseCommand(body: string, keyword = "@agent-review"): Command | null {
-  // Only the rest of the first line: "@agent-review review\n\nthanks" asks for a review, not a path.
-  const names = [keyword, MENTION_ALIAS].map(escapeRegExp).join("|");
+export function parseCommand(body: string, keyword = "@wachi"): Command | null {
+  // Only the rest of the first line: "@wachi review\n\nthanks" asks for a review, not a path.
+  const names = [keyword, ...MENTION_ALIASES].map(escapeRegExp).join("|");
   const match = body.match(new RegExp(`(?:${names})(?![\\w-])(.*)`));
   if (!match) return null;
   const words = match[1].trim().split(/\s+/).filter(Boolean);
@@ -192,7 +200,7 @@ export function fileKind(path: string): FileKind {
 /**
  * Path rules for `riskScore`. These are defaults taken from the first consumer (`ipc`, `preload`,
  * `main`, `apps/<name>/src`) and are the owner's to tune; per-repository configuration is planned
- * (https://github.com/niway-dev/agent-review/issues/5).
+ * (https://github.com/niway-dev/wachi-code-reviewer/issues/5).
  * The highest matching weight wins. A test or a document scores its kind's weight whatever its
  * path, so `ipc/foo.test.ts` does not outrank the IPC code it tests.
  */
@@ -507,7 +515,7 @@ export function buildReview(input: {
   mention?: string;
 }): Review {
   const { output, files, headSha, since, scoped, costUsd, batches = [], modelLabel } = input;
-  const mention = input.mention ?? "@agent-review";
+  const mention = input.mention ?? "@wachi";
   const commentable = new Map(files.map((f) => [f.filename, commentableLines(f.patch ?? "")]));
   const comments: InlineComment[] = [];
   const outsideDiff: Finding[] = [];
@@ -535,11 +543,11 @@ export function buildReview(input: {
   const fullList = list.join(", ");
   if (notReviewed.length > 0) {
     parts.push(
-      `⚠️ **Partial review**: the agent reviewed ${expected.length - notReviewed.length} of ${expected.length} files of ${scope}, at \`${short(headSha)}\`. Not reviewed: ${fullList}. Ask \`${mention} review <paths>\` for the rest.`,
+      `⚠️ **Partial review**: Wachi reviewed ${expected.length - notReviewed.length} of ${expected.length} files of ${scope}, at \`${short(headSha)}\`. Not reviewed: ${fullList}. Ask \`${mention} review <paths>\` for the rest.`,
     );
   } else {
     parts.push(
-      `**Agent review** of ${scope}, at \`${short(headSha)}\`: all ${expected.length} files reviewed.`,
+      `**Wachi review** of ${scope}, at \`${short(headSha)}\`: all ${expected.length} files reviewed.`,
     );
   }
   parts.push(
@@ -559,7 +567,7 @@ export function buildReview(input: {
     );
   }
   const batchCount = batches.length > 1 ? ` · ${batches.length} batches` : "";
-  parts.push(`<sub>${modelLabel}${batchCount} · $${costUsd.toFixed(2)}</sub>`);
+  parts.push(`<sub>${modelLabel}${batchCount} · $${costUsd.toFixed(2)} · ${SIGNATURE}</sub>`);
   // The next `review` request starts from this commit, so only a review that covered everything
   // may move it; a scoped or partial one would leave the rest never reviewed.
   if (!scoped && notReviewed.length === 0) parts.push(marker(headSha));
@@ -985,7 +993,7 @@ export function review(deps: Deps, repo: string, pr: number, words: string[]) {
   if (parts.length === 0) {
     if (budgetError) {
       bodyOnly(
-        `**The agent ran out of its budget** ($${batchBudget} a batch, $${totalBudget} the pull request) before finishing any batch: nothing here was reviewed reliably. Review part of it: \`${config.mention} review <path> [path…]\`.`,
+        `**Wachi ran out of its budget** ($${batchBudget} a batch, $${totalBudget} the pull request) before finishing any batch: nothing here was reviewed reliably. Review part of it: \`${config.mention} review <path> [path…]\`.`,
       );
       return;
     }
@@ -1191,7 +1199,7 @@ nothing else. Write in English.`;
   const result = runProvider(deps, prompt, dir, deps.config.answerBudgetUsd);
   if (result.isError || !result.text)
     throw new Error(`The agent did not answer (${result.terminalReason}).`);
-  const body = `${result.text}\n\n<sub>${deps.provider.modelLabel()} · $${result.costUsd.toFixed(2)}</sub>`;
+  const body = `${result.text}\n\n<sub>${deps.provider.modelLabel()} · $${result.costUsd.toFixed(2)} · ${SIGNATURE}</sub>`;
   refuseLeak(deps, [body]);
   if (deps.config.dryRun) {
     deps.log(body);

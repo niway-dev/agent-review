@@ -1,15 +1,16 @@
 {
-  "name": "agent-review",
+  "name": "wachi-code-reviewer",
   "version": "1.1.0",
-  "description": "Advisory pull request reviews by an agent CLI, run in your own GitHub Actions with your own key",
+  "description": "An open-source AI code reviewer for GitHub Actions. Reads your diffs, project rules, and architecture decisions. Bring your own API key.",
   "private": false,
   "type": "module",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/niway-dev/agent-review.git"
+    "url": "git+https://github.com/niway-dev/wachi-code-reviewer.git"
   },
   "bin": {
+    "wachi": "src/cli.ts",
     "agent-review": "src/cli.ts"
   },
   "engines": {

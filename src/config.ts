@@ -65,7 +65,7 @@ export function loadConfig(env: Env, warn: (line: string) => void = console.erro
     provider,
     pricePerMTok: get("PRICE_PER_MTOK"),
     reasoningEffort: get("REASONING_EFFORT"),
-    mention: get("MENTION") ?? "@agent-review",
+    mention: get("MENTION") ?? "@wachi",
     operator: get("OPERATOR") ?? "",
     exclude: (get("EXCLUDE") ?? "").split(",").filter(Boolean),
   };
