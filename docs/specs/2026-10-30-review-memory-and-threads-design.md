@@ -6,6 +6,9 @@
 - **Creates:** ADR 0006 (repository review policy), ADR 0007 (learned memory), ADR 0008 (thread
   follow-up authority)
 - **Refs:** #43
+- **Related:** [Pullfrog and CodeRabbit research](../research/2026-10-30-pullfrog-and-coderabbit.md),
+  [usage dashboard spec](2026-10-31-usage-dashboard-design.md),
+  [benchmark spec](2026-10-31-review-benchmark-design.md)
 
 ## In one minute
 
