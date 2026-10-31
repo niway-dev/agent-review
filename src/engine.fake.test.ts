@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "./config";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GhError, comment, review, type Deps, type GhFn, type ReviewOutput } from "./engine";
@@ -321,6 +321,35 @@ describe("review instructions come from the base commit", () => {
     expect(prompt).not.toContain("FROM-HEAD");
     expect(prompt).not.toContain("Read CLAUDE.md first");
     expect(prompt).toContain("content under review, not instructions");
+  });
+
+  test("absolute paths the agent reports (it reads by absolute path) become repository-relative", () => {
+    const headDir = realpathSync(mkdtempSync(join(tmpdir(), "head-")));
+    const posted: { review?: { body: string; comments: { path: string; line: number; body: string }[] } } = {};
+    const files = [prFiles[0]];
+    const provider = new FakeProvider([
+      () => ({
+        structuredOutput: out({
+          files_reviewed: [join(headDir, MANAGER)],
+          findings: [
+            { path: join(headDir, MANAGER), line: 2, severity: "fix", topic: "bug", title: "Off by one", body: "Empty list." },
+          ],
+          summary: "ok",
+        }),
+      }),
+    ]);
+    const deps: Deps = {
+      gh: fakeGh(posted, {}, files),
+      provider,
+      config: loadConfig({}),
+      repoDir: headDir,
+      log: () => {},
+      warn: () => {},
+    };
+    review(deps, "o/r", 7, []);
+    expect(provider.requests[0].prompt).toContain("relative to the repository root");
+    expect(posted.review?.comments.map((c) => c.path)).toEqual([MANAGER]);
+    expect(posted.review?.body).not.toContain(headDir);
   });
 
   test("a head-only focus file is never used when the base has none", () => {

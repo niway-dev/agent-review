@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { locatePrompt as locate } from "./locate";
 import type { NeutralTool, ProviderAdapter, ProviderRequest, ProviderResult } from "./types";
 
 const BINARY = "codex";
@@ -163,13 +164,9 @@ export function buildCodexArgs(opts: {
   ];
 }
 
-/**
- * Where the files are. The session does not start in the head (see the header), so the model is
- * told the absolute paths; the engine's own prompt refers to them by relative name.
- */
+/** See `locatePrompt` in locate.ts; Codex's model has a shell, so it may also `cd` into the head. */
 export function locatePrompt(prompt: string, repoDir: string, addDirs: string[]) {
-  const extra = addDirs.length > 0 ? ` The scratch files the prompt mentions are under ${addDirs.join(", ")}.` : "";
-  return `The repository to review is checked out at ${repoDir}. Every relative path below is relative to it: read files there by absolute path, or cd into it at the start of each command.${extra} Only read: never build, test or run the repository's code.\n\n${prompt}`;
+  return locate(prompt, repoDir, addDirs, { shell: true });
 }
 
 interface CodexEvent {

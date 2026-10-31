@@ -52,8 +52,11 @@ Never executed by the engine: the head's Bun configuration and environment files
 Code settings and hooks (see above). Still read as data: the head's files through the agent's read
 tools. The review instructions (the focus file `.github/agent-review.md`, `CLAUDE.md` and
 `AGENTS.md`) are read from the pull request's base commit, never from the head, and the prompt
-says the head's copies are content under review. Claude Code may still load the head's `CLAUDE.md`
-as project memory, since the head is its working directory (see below). Content the agent reads can still
+says the head's copies are content under review. Neither provider starts inside the head: each
+runs in an empty scratch directory and gets the head as a readable directory (`--add-dir` for
+Claude Code), so the head's `CLAUDE.md` is not auto-loaded as project memory
+(`test/provider-isolation.test.ts`, [the Claude Code provider](docs/providers/claude-code.md)).
+Content the agent reads on purpose, by absolute path, can still
 try to steer the review (prompt injection); that is what the read-only tools, the budget caps and
 the trust assumption are for.
 
@@ -76,9 +79,10 @@ flags, but the reusable workflow is the preferred install.
 - The new workflow layout has not been exercised in a full paid run.
 
 - Whether the `/proc` deny rules in the engine settings have any effect under `--restricted`.
-- Whether the reviewed branch's `CLAUDE.md` is still loaded as memory under `--restricted`. If it
-  is, the model sees the head's copy as project memory next to the base copy in the prompt; the
-  prompt tells it the head's copy is content, which is an instruction and not a guarantee.
+- That the head's instruction files stay unloaded on a Claude Code version other than 2.1.304
+  (checked) and 2.1.314 (a `--restricted` probe only). The opt-in harness
+  `test/provider-isolation.test.ts` re-checks any binary; the child environment must never carry
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, which makes `--add-dir` directories load.
 - The hardening flags have been checked to be accepted by the CLI, but they have not been
   exercised in a full paid review.
 

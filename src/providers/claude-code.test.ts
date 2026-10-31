@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildChildEnv,
+  CHILD_ENV_ALLOWLIST,
   buildClaudeArgs,
   ClaudeCodeProvider,
   findEngineSettings,
@@ -123,7 +124,7 @@ describe("ClaudeCodeProvider with a stub binary", () => {
   test("preflight reads the version for the footer; run maps the result and strips GitHub tokens", () => {
     const binary = stubBinary(`
 if [ "$1" = "--version" ]; then echo "2.1.304 (Claude Code)"; exit 0; fi
-stdin=$(cat)
+stdin=$(cat | tr '\n' ' ')
 printf '{"is_error":false,"subtype":"success","num_turns":3,"total_cost_usd":0.12,"duration_ms":50,"result":"stdin=%s token=[%s]","structured_output":{"ok":true}}' "$stdin" "$GH_TOKEN"`);
     process.env.GH_TOKEN = "must-not-reach-the-child";
     const provider = new ClaudeCodeProvider({ model: "claude-sonnet-5-5", requireApiKey: false, binary });
@@ -138,8 +139,32 @@ printf '{"is_error":false,"subtype":"success","num_turns":3,"total_cost_usd":0.1
       terminalReason: "success",
       isError: false,
     });
-    expect(result.text).toBe("stdin=the prompt token=[]");
+    expect(result.text).toEndWith("the prompt token=[]");
+    expect(result.text).toStartWith("stdin=The repository to review is checked out at ");
     delete process.env.GH_TOKEN;
+  });
+
+  test("starts in an empty scratch directory outside the head, with the head as --add-dir only", () => {
+    const head = mkdtempSync(join(tmpdir(), "head-"));
+    const scratch = mkdtempSync(join(tmpdir(), "pr-scratch-"));
+    const binary = stubBinary(`
+cat >/dev/null
+printf '{"is_error":false,"subtype":"success","result":"cwd=%s ls=[%s] args=%s"}' "$(pwd -P)" "$(ls -A)" "$*"`);
+    const provider = new ClaudeCodeProvider({ model: "m", requireApiKey: false, binary });
+    const text = provider.run({ ...request, cwd: head, addDirs: [scratch] }).text ?? "";
+    const cwd = text.match(/cwd=(\S+)/)?.[1] ?? "";
+    expect(cwd).not.toBe("");
+    expect(realpathSync(head).startsWith(cwd)).toBe(false);
+    expect(cwd.startsWith(realpathSync(head))).toBe(false);
+    expect(text).toContain("ls=[]");
+    expect(text).toContain(`--add-dir ${head} --add-dir ${scratch}`);
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  test("never passes the variable that makes --add-dir directories load CLAUDE.md", () => {
+    expect(CHILD_ENV_ALLOWLIST as readonly string[]).not.toContain("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD");
+    const child = buildChildEnv({ PATH: "/bin", CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1" });
+    expect(Object.keys(child)).toEqual(["PATH"]);
   });
 
   test("a spend-cap ending is reported as budget", () => {

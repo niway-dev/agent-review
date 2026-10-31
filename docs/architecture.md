@@ -96,7 +96,9 @@ All names are in `src/engine.ts` unless a file is given.
 5. **The provider call.** `reviewBatch` writes `pr.json` and `threads.json` to a scratch directory
    and calls `deps.provider.run` with the read-only tools (`read`, `glob`, `grep`), `SCHEMA` as the
    output schema (files reviewed, files skipped with a closed reason, findings, thread replies,
-   summary), the head as the working directory and a per-batch spend cap. *Why:* a structured
+   summary), the head as a readable directory (the adapter starts the agent in an empty scratch
+   directory, not in the head) and a per-batch spend cap. Paths the agent reports are made
+   repository-relative afterwards (`relativisePaths`), because it reads by absolute path. *Why:* a structured
    answer is what makes coverage checkable; read-only tools are what make the call safe to run
    with the key (see the harness below).
 
@@ -235,15 +237,17 @@ its design branch).
 **What from the head is read as data, and what is never executed.** The agent reads the head's
 files through its read tools; a pull request can put text there that tries to steer the review
 (prompt injection), and the read-only tools, the budget caps and the trust assumption are the
-answer. Claude Code may also load the head's `CLAUDE.md` as project memory because the head is
-its working directory (unverified under `--restricted`, below); the prompt tells the model to
-treat it as content. The engine never executes the head's Bun configuration, `.env`, Claude Code
+answer. Neither adapter starts the agent in the head: Claude Code runs in an empty scratch
+directory with the head as `--add-dir` (which does not load `CLAUDE.md`), Codex in an empty
+scratch directory too, so the head's instruction files are not auto-loaded; the prompt tells the
+model to treat any it opens on purpose as content. Verified for Claude Code 2.1.304 by an opt-in
+harness ([the Claude Code provider](providers/claude-code.md)). The engine never executes the head's Bun configuration, `.env`, Claude Code
 settings or hooks.
 
 **Still unverified** (from [SECURITY.md](../SECURITY.md)): that `--no-env-file` and `--config=`
 keep out every runtime file (only `bunfig.toml` `preload` and `.env` are tested, on Bun 1.3.4);
 that the new layout has been through a full paid run; whether the `/proc` deny rules do anything
-under `--restricted`; whether the head's `CLAUDE.md` still loads as memory under `--restricted` (the CLI offers `--bare` and `--safe-mode` to turn it off, but neither is applied: see [the Claude Code provider](providers/claude-code.md));
+under `--restricted`; whether the head's instruction files stay unloaded on Claude Code versions other than the pinned one (see [the Claude Code provider](providers/claude-code.md));
 and the hardening flags against a hostile branch beyond the fixtures. None of this is a sandbox,
 and the assumption that everyone who can push is trusted is what holds it together.
 
@@ -259,7 +263,7 @@ and the assumption that everyone who can push is trusted is what holds it togeth
 | `leaksSecret(texts)` | True when any text holds a credential of this provider; the engine throws and posts nothing |
 | `run(request)` | One call to completion: returns structured output or text, cost, turns, duration and a terminal reason (`success`, `budget`, `error`); throws when there is no result at all |
 
-The request carries the prompt, the working directory, extra readable directories, neutral tool
+The request carries the prompt, the head's directory (which an adapter must not use as the agent's working directory), extra readable directories, neutral tool
 names (`read`, `glob`, `grep`), the spend cap, an optional output schema and whether the prompt
 goes through stdin. `getProvider` in `src/providers/index.ts` maps a name to an adapter and
 rejects unknown names as a usage error.

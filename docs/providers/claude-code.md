@@ -51,9 +51,9 @@ on its install step to pin the hash. The script installs only the binary; it doe
 | --- | --- |
 | Tools `read`, `glob`, `grep` | `--tools Read,Glob,Grep` and `--allowedTools Read,Glob,Grep` |
 | A spend cap | `--max-budget-usd <n>` |
-| Extra directories | `--add-dir <dir>` for each |
+| The head and extra directories | `--add-dir <head>` and `--add-dir <dir>` for each; the process itself starts in an empty scratch directory (see "Start outside the head") |
 | An output schema | `--output-format json --json-schema <schema>` |
-| The prompt via stdin | The prompt on stdin, never as an argument (a large diff would exceed Linux's 128 KB limit) |
+| The prompt via stdin | The prompt, preceded by the absolute paths of the head and the scratch files, on stdin, never as an argument (a large diff would exceed Linux's 128 KB limit) |
 | The model | `--model <AGENT_REVIEW_MODEL>` |
 
 Always added by the adapter, whatever the engine asks: `--restricted`, `--strict-mcp-config`,
@@ -93,6 +93,25 @@ The footer label is built from the model name and `claude --version`, for exampl
 `ANTHROPIC_API_KEY` and anything shaped like an Anthropic key; the engine throws and posts nothing
 when any text matches. An encoded key would pass that check.
 
+## Start outside the head
+
+`run` creates an empty directory under the system temp directory, starts `claude` there, and
+deletes it afterwards. The head (`request.cwd`) is passed as `--add-dir`, and `locatePrompt`
+(`src/providers/locate.ts`) tells the model where the head is and to read files by absolute path.
+The engine turns any absolute path the model reports back into a repository-relative one
+(`relativisePaths` in `src/engine.ts`). The review and the answer use the same `run`.
+
+*Why:* Claude Code discovers `CLAUDE.md` (and `.claude/`) from its working directory and parents.
+A pull request must not supply instructions next to the base-commit rules the engine puts in the
+prompt, and starting elsewhere removes the question instead of relying on one flag. A directory
+passed with `--add-dir` does not load `CLAUDE.md` unless `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`
+is set, so that variable is not in `CHILD_ENV_ALLOWLIST` (a test pins this). Codex uses the same
+layout (see [Codex](codex.md)).
+
+Caveat: the scratch directory lives under the temp directory, and Claude Code also reads
+`CLAUDE.md` from parent directories. A `CLAUDE.md` in the runner's temp directory or above it would
+load. Hosted runners have none.
+
 ## What each hardening flag is for
 
 - `--restricted`: removes the built-in tools that run commands or code, and `WebFetch`, unless
@@ -107,6 +126,31 @@ when any text matches. An encoded key would pass that check.
 ## What is verified and what is not
 
 Verified:
+
+- The head's instruction files are not auto-loaded (Claude Code 2.1.304, darwin-arm64, SHA-256
+  `b9ac5374839f14abf3f1f45610637c332b5daee5ce0d1634726cef87aab78e6a`). Command, from the
+  repository root, with the pinned binary installed outside the repository:
+
+  ```sh
+  CLAUDE_CODE_VERSION=2.1.304 CLAUDE_INSTALL_DIR=/tmp/wachi-cc bash src/install-claude-code.sh
+  WACHI_PROVIDER_ISOLATION=1 WACHI_CLAUDE_BIN=/tmp/wachi-cc/claude bun test test/provider-isolation.test.ts
+  ```
+
+  `test/provider-isolation.test.ts` runs the real adapter against a local mock Messages API
+  (`test/support/mock-anthropic.ts`, a separate process that records every request body) with a
+  head holding `CLAUDE.md`, `AGENTS.md`, `.claude/CLAUDE.md` and `src/CLAUDE.md`, each with a
+  sentinel string. `ANTHROPIC_BASE_URL` reaches the child only through the harness's wrapper
+  script; the adapter's allowlist is unchanged. Result: 7 tests pass. No sentinel appears in any
+  request before a tool result, for the review and the answer calls; a sentinel appears only after
+  the model's `Read` of that file (data, as intended). Controls in the same file: the binary with
+  no hardening and the head as its working directory sends `SENTINEL_CLAUDE` and
+  `SENTINEL_DOTCLAUDE` (so the harness can see an auto-load); started in an empty directory with
+  the head as `--add-dir` it sends none, even without `--restricted`; with
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` it sends them again. `AGENTS.md` never appeared:
+  Claude Code does not load it by itself, only a loaded `CLAUDE.md` that imports it could.
+  Before this change the same harness also passed on `--restricted` alone (the head as working
+  directory), so the scratch directory is defence in depth, not the fix for a reproduced leak; it
+  also stops depending on one flag's behaviour in a later version.
 
 - A prompt on stdin is accepted with `-p --restricted --strict-mcp-config --tools Read,Glob,Grep
   --output-format json`: a $0 local check with a fake key reached the API and ended in an
@@ -125,14 +169,9 @@ Not verified:
 - That the `/proc` deny rules do anything under `--restricted`. `--restricted` confines file
   tools to the working directories, which may already exclude `/proc`, but nothing here proves
   it. The rules stay because they cost nothing.
-- Whether the reviewed branch's `CLAUDE.md` still loads as memory under `--restricted`. The
-  engine puts the base commit's copy in the prompt and tells the model the head's copy is content
-  under review. Claude Code 2.1.314's `--help` lists two switches that turn CLAUDE.md discovery
-  off: `--bare` (also skips OAuth and keychain auth, hooks and auto-memory, so it changes how the
-  key is read) and `--safe-mode` (disables all customizations, including CLAUDE.md). Neither is
-  applied: the pinned version in `templates/caller-workflow.yml` is 2.1.304, which was not
-  available to check, and neither flag was run alongside `--restricted` and `--add-dir` in a real
-  review. Applying one needs that check first.
+- Claude Code versions other than 2.1.304 against the harness below (a one-off `--restricted`
+  probe on 2.1.314 loaded nothing either, but the harness was not run on it). `--bare` and
+  `--safe-mode` were not evaluated and are not applied: the harness showed they are not needed.
 - The hardening flags against a hostile branch. Stage 2 of the plan is to test them with hostile
   fixtures; until then none of this is a guarantee against a malicious branch.
 

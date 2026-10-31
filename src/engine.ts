@@ -28,7 +28,7 @@
  * The command-line entry point is `src/cli.ts`.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { operatorProblem, type EngineConfig } from "./config";
@@ -1494,6 +1494,9 @@ ${list}
 Each diff line starts with its line number in the file at the head commit (blank for removed
 lines). Use that number as a finding's \`line\`, never a position in the diff.
 
+Report every path (findings, files_reviewed, files_skipped) relative to the repository root, as
+in the list above.
+
 Review every file of this part, including tests, stylesheets, documentation and messages: a
 test that asserts the wrong thing or a doc that says something false is a finding. Before you
 report a finding on a file, read that file in full: the line that disproves a finding is often
@@ -1519,6 +1522,36 @@ ${RULES}${instructions}
 <diff>
 ${annotateDiff(files)}
 </diff>`;
+}
+
+/**
+ * The agent starts outside the head and reads its files by absolute path, so it may report
+ * `/runner/work/repo/src/a.ts` where the engine matches `src/a.ts` against the diff. Strips the
+ * head's location (as given and as resolved, since a symlinked temp dir differs) from every path.
+ */
+export function relativisePaths(output: ReviewOutput, repoDir: string): ReviewOutput {
+  const roots = new Set<string>();
+  for (const root of [repoDir, safeRealpath(repoDir)]) if (root) roots.add(root.replace(/\/+$/, ""));
+  const strip = (path: string) => {
+    for (const root of roots) {
+      if (root !== "" && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+    }
+    return path;
+  };
+  return {
+    ...output,
+    files_reviewed: output.files_reviewed.map(strip),
+    files_skipped: output.files_skipped.map((s) => ({ ...s, path: strip(s.path) })),
+    findings: output.findings.map((f) => ({ ...f, path: strip(f.path) })),
+  };
+}
+
+function safeRealpath(path: string) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
 }
 
 /** One provider call over one batch, with the batch's diff inside the prompt. */
@@ -1555,7 +1588,8 @@ function reviewBatch(
     return { output: undefined, budget: false, turns: 0, costUsd: call.costUsd, failed: true };
   }
   const result = call.value;
-  const output = !result.isError ? (result.structuredOutput as ReviewOutput | undefined) : undefined;
+  const raw = !result.isError ? (result.structuredOutput as ReviewOutput | undefined) : undefined;
+  const output = raw && relativisePaths(raw, deps.repoDir ?? process.cwd());
   return {
     output,
     budget: result.terminalReason === "budget",

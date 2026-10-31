@@ -40,7 +40,9 @@ The prompt carries the base commit's `CLAUDE.md`, `AGENTS.md` and focus file (se
 starts in an empty scratch directory (row "Start outside the head" above), so the only copies the
 model meets are the ones it opens on purpose, and the prompt calls those content under review. The
 adapter needs no flag for this. The `--cd` check above covered a skill; a planted `AGENTS.md` was
-not tested separately.
+not tested separately. The Claude Code adapter now follows the same design (empty scratch working
+directory, the head as a readable directory, the prompt naming its absolute path), through the
+shared `locatePrompt` in `src/providers/locate.ts`; Codex was not run for that change.
 
 ### What is not covered
 
