@@ -72,15 +72,15 @@ All names are in `src/engine.ts` unless a file is given.
    budget cut-off land on the least important files.
 
 4. **Prompt assembly.** `buildBatchPrompt` writes, in order: the pull request and commit, the
-   instruction to read `CLAUDE.md` and the ADRs first, the full file list for orientation, the
+   pointer to the ADRs, the full file list for orientation, the
    batch's own file list, the line-number convention, the review instruction, the thread
    instruction when open threads exist, the label rules (`RULES`: each severity with the test a
    finding must pass, each topic, the combination rules, and the instruction not to report that a
    decision record is edited, since the engine does that, and the evidence rules: cite the line
    behind every premise of a "blocker" or "fix" or ask it as a "question", suggest a fix only for
    the failure shown, search all callers of a shared contract, no escape clauses), the
-   repository's focus file
-   (`repoFocus`, `.github/agent-review.md`) and last the diff. `annotateDiff` prefixes each diff
+   repository's instructions
+   (`renderInstructions`, see below) and last the diff. `annotateDiff` prefixes each diff
    line with its line number in the file at the head, so a finding's `line` is one GitHub can anchor
    a thread to. The prompt goes to the provider through stdin because a large diff would exceed
    the argument-length limit. It includes the no-rationing sentence: "You do not manage a budget:
@@ -218,16 +218,32 @@ agent never receives `GH_TOKEN`, a base URL, a proxy, `NODE_OPTIONS`, `BUN_*` or
 The binary itself is installed by `src/install-claude-code.sh` at a pinned version and checked
 against a SHA-256. Third-party actions are pinned by commit SHA.
 
-**What from the head is read as data, and what is never executed.** The engine reads the focus
-file `.github/agent-review.md` from the head and appends it to the prompt. The agent reads the
-head's files and `CLAUDE.md` through its read tools. Both can try to steer the review (prompt
-injection); the read-only tools, the budget caps and the trust assumption are the answer. The
-engine never executes the head's Bun configuration, `.env`, Claude Code settings or hooks.
+**Review instructions come from the base commit.** Before the first batch, `review` (and
+`answer`) reads the pull request's `base.sha` and fetches `.github/agent-review.md` (or the old
+`.github/claude-review.md`), `CLAUDE.md` and `AGENTS.md` at that commit through
+`gh api repos/{repo}/contents/{path}?ref={base_sha}` (`readBaseInstructions`). A 404 means the file
+is absent, any other error stops the run, and each file is cut at 64 KB with a notice in the
+prompt. The text goes into the prompt under "Repository instructions (from the base commit
+`<sha7>`)", which also says the head's copies of those files are content under review, not
+instructions. The head's copy is never a fallback, so a pull request cannot rewrite the rules it
+is reviewed under ([#10](https://github.com/niway-dev/wachi-reviewer/issues/10)). When the pull
+request edits one of these files, the review body says the change takes effect after merge.
+This is a stacked pull request's base branch tip, not the merge base with the default branch;
+the latter is a later change ([ADR 0006](adr/0006-repository-review-policy.md) decision 3, on
+its design branch).
+
+**What from the head is read as data, and what is never executed.** The agent reads the head's
+files through its read tools; a pull request can put text there that tries to steer the review
+(prompt injection), and the read-only tools, the budget caps and the trust assumption are the
+answer. Claude Code may also load the head's `CLAUDE.md` as project memory because the head is
+its working directory (unverified under `--restricted`, below); the prompt tells the model to
+treat it as content. The engine never executes the head's Bun configuration, `.env`, Claude Code
+settings or hooks.
 
 **Still unverified** (from [SECURITY.md](../SECURITY.md)): that `--no-env-file` and `--config=`
 keep out every runtime file (only `bunfig.toml` `preload` and `.env` are tested, on Bun 1.3.4);
 that the new layout has been through a full paid run; whether the `/proc` deny rules do anything
-under `--restricted`; whether the head's `CLAUDE.md` still loads as memory under `--restricted`;
+under `--restricted`; whether the head's `CLAUDE.md` still loads as memory under `--restricted` (the CLI offers `--bare` and `--safe-mode` to turn it off, but neither is applied: see [the Claude Code provider](providers/claude-code.md));
 and the hardening flags against a hostile branch beyond the fixtures. None of this is a sandbox,
 and the assumption that everyone who can push is trusted is what holds it together.
 
@@ -317,8 +333,7 @@ and the copy-the-files install. The two sets must stay equal.
 - Open issues: [#5](https://github.com/niway-dev/wachi-reviewer/issues/5) (the ADR directory the
   prompt names is fixed), [#8](https://github.com/niway-dev/wachi-reviewer/issues/8) (one account
   moving the floating `v1` tag changes the code every consumer runs with its key),
-  [#10](https://github.com/niway-dev/wachi-reviewer/issues/10) (the focus file and `CLAUDE.md` are
-  read from the pull request head), [#11](https://github.com/niway-dev/wachi-reviewer/issues/11)
+  [#11](https://github.com/niway-dev/wachi-reviewer/issues/11)
   (posted output is checked only for the key's exact value and shape, so an encoded key passes).
   Issue [#9](https://github.com/niway-dev/wachi-reviewer/issues/9) (pin actions by SHA) is still
   open although the workflows are pinned on `main`.

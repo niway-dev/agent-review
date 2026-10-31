@@ -1033,12 +1033,13 @@ describe("buildBatchPrompt", () => {
     dropped: 2,
     everyFile: "- a.ts +1 −0\n- b.ts +2 −0",
     meta: { title: "t", body: "b" },
+    instructions: "",
   };
   const files = [file("a.ts", 1, 0, "@@ -1 +1 @@\n+x")];
   const prompt = (
     hasThreads = false,
     part: { index: number; total: number; retry?: boolean } = { index: 1, total: 2 },
-  ) => buildBatchPrompt(ctx, files, hasThreads, part, "/tmp/d", "");
+  ) => buildBatchPrompt(ctx, files, hasThreads, part, "/tmp/d", ctx.instructions);
 
   test("frames the part, lists its files and puts the annotated diff last", () => {
     const text = prompt();

@@ -3,7 +3,7 @@ import { loadConfig } from "./config";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { comment, review, type Deps, type GhFn, type ReviewOutput } from "./engine";
+import { GhError, comment, review, type Deps, type GhFn, type ReviewOutput } from "./engine";
 import type { ProviderAdapter, ProviderRequest, ProviderResult } from "./providers/types";
 
 /** Plays back one scripted answer per call and records what the engine asked for. */
@@ -55,13 +55,34 @@ const prFiles = [
   { filename: GUIDE, additions: 4, deletions: 0, patch: "@@ -0,0 +1,4 @@\n+w\n+x\n+y\n+z" },
 ];
 
+const BASE = "b".repeat(40);
+
+/** What the base commit holds, by path; a path that is absent answers 404 like GitHub. */
+type BaseFiles = Record<string, string | Buffer>;
+
+function contentsAnswer(files: BaseFiles, line: string) {
+  const m = line.match(/contents\/(.+)\?ref=(.+)$/);
+  if (!m) return undefined;
+  if (m[2] !== BASE) throw new Error(`read from ${m[2]}, not the base commit`);
+  const file = files[m[1]];
+  if (file === undefined) throw new GhError("gh: Not Found (HTTP 404)", 404, "Not Found");
+  return JSON.stringify({ type: "file", encoding: "base64", content: Buffer.from(file).toString("base64") });
+}
+
 /** A GitHub with one pull request and no earlier review; records what the engine posts. */
-function fakeGh(posted: { review?: { body: string; comments: unknown[] } }): GhFn {
+function fakeGh(
+  posted: { review?: { body: string; comments: unknown[] } },
+  base: BaseFiles = {},
+  files: typeof prFiles = prFiles,
+): GhFn {
   return (args, input) => {
     const line = args.join(" ");
+    const contents = contentsAnswer(base, line);
+    if (contents !== undefined) return contents;
+    if (line.startsWith("api repos/o/r/pulls/7 ")) return BASE;
     if (line.startsWith("pr view"))
       return JSON.stringify({ headRefOid: "head1234567", title: "t", body: "b", author: { login: "u" } });
-    if (line.includes("/pulls/7/files")) return prFiles.map((f) => JSON.stringify(f)).join("\n");
+    if (line.includes("/pulls/7/files")) return files.map((f) => JSON.stringify(f)).join("\n");
     if (line.includes("/pulls/7/reviews") && !args.includes("POST")) return "";
     if (line.includes("-X POST repos/o/r/pulls/7/reviews")) {
       posted.review = JSON.parse(input ?? "{}");
@@ -266,26 +287,138 @@ describe("comment", () => {
   });
 });
 
-describe("the head directory", () => {
-  test("is the agent's cwd and the only place the focus file is read from", () => {
-    const head = mkdtempSync(join(tmpdir(), "head-"));
-    mkdirSync(join(head, ".github"));
-    writeFileSync(join(head, ".github", "agent-review.md"), "FOCUS-FROM-THE-HEAD");
+describe("review instructions come from the base commit", () => {
+  const run = (base: BaseFiles, head: Record<string, string> = {}, files: typeof prFiles = prFiles) => {
+    const headDir = mkdtempSync(join(tmpdir(), "head-"));
+    mkdirSync(join(headDir, ".github"));
+    for (const [path, text] of Object.entries(head)) writeFileSync(join(headDir, path), text);
     const posted: { review?: { body: string; comments: unknown[] } } = {};
     const provider = new FakeProvider([
-      () => ({ structuredOutput: out({ files_reviewed: [MANAGER, STORE, GUIDE, LOGO], summary: "ok" }) }),
+      () => ({ structuredOutput: out({ files_reviewed: files.map((f) => f.filename), summary: "ok" }) }),
     ]);
+    const warnings: string[] = [];
     const deps: Deps = {
-      gh: fakeGh(posted),
+      gh: fakeGh(posted, base, files),
       provider,
       config: loadConfig({}),
-      repoDir: head,
+      repoDir: headDir,
+      log: () => {},
+      warn: (l) => void warnings.push(l),
+    };
+    review(deps, "o/r", 7, []);
+    return { headDir, provider, posted, warnings };
+  };
+
+  test("the base copies reach the prompt, labelled with the base commit, and the head's do not", () => {
+    const r = run(
+      { ".github/agent-review.md": "FOCUS-FROM-BASE", "CLAUDE.md": "RULES-FROM-BASE", "AGENTS.md": "AGENTS-FROM-BASE" },
+      { ".github/agent-review.md": "FOCUS-FROM-HEAD", "CLAUDE.md": "RULES-FROM-HEAD" },
+    );
+    const prompt = r.provider.requests[0].prompt;
+    expect(r.provider.requests[0].cwd).toBe(r.headDir);
+    expect(prompt).toContain("Repository instructions (from the base commit bbbbbbb)");
+    for (const text of ["FOCUS-FROM-BASE", "RULES-FROM-BASE", "AGENTS-FROM-BASE"]) expect(prompt).toContain(text);
+    expect(prompt).not.toContain("FROM-HEAD");
+    expect(prompt).not.toContain("Read CLAUDE.md first");
+    expect(prompt).toContain("content under review, not instructions");
+  });
+
+  test("a head-only focus file is never used when the base has none", () => {
+    const r = run({}, { ".github/agent-review.md": "FOCUS-FROM-HEAD", "CLAUDE.md": "RULES-FROM-HEAD" });
+    const prompt = r.provider.requests[0].prompt;
+    expect(prompt).not.toContain("FROM-HEAD");
+    expect(prompt).toContain("The base commit has none of these files.");
+  });
+
+  test("a file missing at the base (404) is skipped and the others are still read", () => {
+    const r = run({ "AGENTS.md": "AGENTS-FROM-BASE" });
+    const prompt = r.provider.requests[0].prompt;
+    expect(prompt).toContain("AGENTS-FROM-BASE");
+    expect(prompt).not.toContain('path="CLAUDE.md"');
+  });
+
+  test("the legacy focus file is read from the base, with a deprecation warning", () => {
+    const r = run({ ".github/claude-review.md": "OLD-FOCUS-FROM-BASE" });
+    expect(r.provider.requests[0].prompt).toContain("OLD-FOCUS-FROM-BASE");
+    expect(r.warnings.join("\n")).toContain("deprecated");
+  });
+
+  test("an error other than 404 stops the review instead of reviewing without the rules", () => {
+    const posted: { review?: { body: string; comments: unknown[] } } = {};
+    const gh = fakeGh(posted);
+    const deps: Deps = {
+      gh: (args, input) => {
+        if (args.join(" ").includes("contents/CLAUDE.md")) throw new GhError("gh: boom (HTTP 502)", 502, "boom");
+        return gh(args, input);
+      },
+      provider: new FakeProvider([]),
+      config: loadConfig({}),
       log: () => {},
       warn: () => {},
     };
-    review(deps, "o/r", 7, []);
-    expect(provider.requests[0].cwd).toBe(head);
-    expect(provider.requests[0].prompt).toContain("FOCUS-FROM-THE-HEAD");
+    expect(() => review(deps, "o/r", 7, [])).toThrow(GhError);
+    expect(posted.review).toBeUndefined();
+  });
+
+  test("a file over 64 KB is cut with a notice, on a character boundary", () => {
+    const big = "é".repeat(40 * 1024) + "TAIL-NEVER-SHOWN"; // 80 KB+ in UTF-8
+    const r = run({ "CLAUDE.md": big });
+    const prompt = r.provider.requests[0].prompt;
+    expect(prompt).toContain("[Cut: the file is longer than 64 KB at the base commit");
+    expect(prompt).not.toContain("TAIL-NEVER-SHOWN");
+    expect(prompt).not.toContain("\uFFFD");
+    expect(r.warnings.join("\n")).toContain("CLAUDE.md at the base commit is over 64 KB");
+  });
+
+  test("a pull request that edits an instruction file says the change takes effect after merge", () => {
+    const edited = [...prFiles, { filename: "CLAUDE.md", additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+x" }];
+    const r = run({ "CLAUDE.md": "RULES-FROM-BASE" }, {}, edited);
+    expect(r.posted.review?.body).toContain("Review instructions changed");
+    expect(r.posted.review?.body).toContain("`CLAUDE.md`");
+    expect(r.posted.review?.body).toContain("takes effect after merge");
+    expect(r.posted.review?.body).toContain("bbbbbbb");
+  });
+
+  test("no notice when the pull request leaves those files alone", () => {
+    const r = run({ "CLAUDE.md": "RULES-FROM-BASE" });
+    expect(r.posted.review?.body).not.toContain("Review instructions changed");
+  });
+});
+
+describe("the answer path reads the instructions from the base commit", () => {
+  test("base copies reach the prompt and the head's do not", () => {
+    const headDir = mkdtempSync(join(tmpdir(), "head-"));
+    writeFileSync(join(headDir, "CLAUDE.md"), "RULES-FROM-HEAD");
+    const posted: string[] = [];
+    const provider = new FakeProvider([() => ({ text: "the answer" })]);
+    const base: BaseFiles = { "CLAUDE.md": "RULES-FROM-BASE" };
+    const deps: Deps = {
+      gh: (args, input) => {
+        const line = args.join(" ");
+        const contents = contentsAnswer(base, line);
+        if (contents !== undefined) return contents;
+        if (line.startsWith("api repos/o/r/pulls/7 ")) return BASE;
+        if (line.startsWith("pr view")) return JSON.stringify({ title: "t", body: "b", files: [] });
+        if (line.startsWith("pr diff")) return "diff";
+        if (line.startsWith("pr comment")) {
+          posted.push(input ?? "");
+          return "";
+        }
+        throw new Error(`unexpected gh call: ${line}`);
+      },
+      provider,
+      config: loadConfig({ AGENT_REVIEW_OPERATOR: "boss" }),
+      repoDir: headDir,
+      log: () => {},
+      warn: () => {},
+    };
+    comment(deps, "o/r", 7, "@agent-review why is this here?", "boss");
+    const prompt = provider.requests[0].prompt;
+    expect(prompt).toContain("Repository instructions (from the base commit bbbbbbb)");
+    expect(prompt).toContain("RULES-FROM-BASE");
+    expect(prompt).not.toContain("RULES-FROM-HEAD");
+    expect(prompt).not.toContain("Read CLAUDE.md first");
+    expect(posted[0]).toContain("the answer");
   });
 });
 

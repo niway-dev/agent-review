@@ -125,8 +125,14 @@ Not verified:
 - That the `/proc` deny rules do anything under `--restricted`. `--restricted` confines file
   tools to the working directories, which may already exclude `/proc`, but nothing here proves
   it. The rules stay because they cost nothing.
-- Whether the reviewed branch's `CLAUDE.md` still loads as memory under `--restricted`. The prompt
-  asks the agent to read it explicitly.
+- Whether the reviewed branch's `CLAUDE.md` still loads as memory under `--restricted`. The
+  engine puts the base commit's copy in the prompt and tells the model the head's copy is content
+  under review. Claude Code 2.1.314's `--help` lists two switches that turn CLAUDE.md discovery
+  off: `--bare` (also skips OAuth and keychain auth, hooks and auto-memory, so it changes how the
+  key is read) and `--safe-mode` (disables all customizations, including CLAUDE.md). Neither is
+  applied: the pinned version in `templates/caller-workflow.yml` is 2.1.304, which was not
+  available to check, and neither flag was run alongside `--restricted` and `--add-dir` in a real
+  review. Applying one needs that check first.
 - The hardening flags against a hostile branch. Stage 2 of the plan is to test them with hostile
   fixtures; until then none of this is a guarantee against a malicious branch.
 

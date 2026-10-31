@@ -33,6 +33,15 @@ enough.
 | Time limit | 15 minutes per call, then `SIGKILL`; reported as `budget` | A call that never ends; Codex has no spend cap | Unit test |
 | Key in output | `leaksSecret`: the exact key or any `sk-…` shape anywhere in the answer | Posting the key | Unit test |
 
+### Review instructions
+
+The prompt carries the base commit's `CLAUDE.md`, `AGENTS.md` and focus file (see
+[architecture](../architecture.md)). Codex does not auto-load the head's `AGENTS.md`: the session
+starts in an empty scratch directory (row "Start outside the head" above), so the only copies the
+model meets are the ones it opens on purpose, and the prompt calls those content under review. The
+adapter needs no flag for this. The `--cd` check above covered a skill; a planted `AGENTS.md` was
+not tested separately.
+
 ### What is not covered
 
 - **The key is readable inside the sandbox.** The read-only sandbox lets commands read any file the
