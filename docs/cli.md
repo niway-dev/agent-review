@@ -18,7 +18,7 @@ engine uses `Bun.Glob`).
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `--repo-dir <dir>` (or `--repo-dir=<dir>`) | `.` | The checked-out pull request head. The engine reads the focus file from it and starts the agent with it as working directory; it reads nothing else from the current directory. A directory that does not exist is a usage error. |
+| `--repo-dir <dir>` (or `--repo-dir=<dir>`) | `.` | The checked-out pull request head. The engine starts the agent with it as working directory; it reads nothing from it itself, and nothing else from the current directory. A directory that does not exist is a usage error. |
 
 The reusable workflow runs the engine from its own checkout (`engine/`) and passes the head
 (`head/`) here, so the process's working directory is never the reviewed code. Run it the same way:
@@ -101,8 +101,8 @@ Installed copies can migrate one variable at a time. The new name wins when both
 
 | File | Meaning |
 | --- | --- |
-| `.github/agent-review.md` | Optional. The repository's review focus, read from the checked-out head and appended to the rules. |
-| `.github/claude-review.md` | The old name. Read when the new file is absent, with a notice on stderr. |
+| `.github/agent-review.md` | Optional. The repository's review focus, read from the pull request's base commit and appended to the rules. A pull request that edits it is reviewed under the base version. |
+| `.github/claude-review.md` | The old name. Read, from the base commit, when the new file is absent, with a notice on stderr. `CLAUDE.md` and `AGENTS.md` are read from the base commit the same way. |
 
 A YAML configuration file is not implemented.
 

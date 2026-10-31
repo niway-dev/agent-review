@@ -3,8 +3,10 @@
  * hardening is documented in docs/providers/claude-code.md.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { locatePrompt } from "./locate";
 import type { NeutralTool, ProviderAdapter, ProviderRequest, ProviderResult } from "./types";
 
 const BINARY = "claude";
@@ -174,22 +176,32 @@ export class ClaudeCodeProvider implements ProviderAdapter {
   run(request: ProviderRequest): ProviderResult {
     // The agent never gets a GitHub token, a base URL or a proxy: see CHILD_ENV_ALLOWLIST.
     const childEnv = buildChildEnv(process.env);
+    // The session starts in an empty scratch directory, never in the head: Claude Code discovers
+    // `CLAUDE.md` (and `.claude/`) from its working directory and its parents, and a pull request
+    // must not supply instructions. The head is only an `--add-dir`, which does not load them.
+    const workDir = mkdtempSync(join(tmpdir(), "agent-review-claude-"));
+    const prompt = locatePrompt(request.prompt, request.cwd, request.addDirs, { shell: false });
     const args = buildClaudeArgs({
-      addDirs: request.addDirs,
+      addDirs: [request.cwd, ...request.addDirs],
       budgetUsd: request.maxBudgetUsd,
       model: this.opts.model,
       settings: findEngineSettings(this.settingsDir),
       tools: request.allowedTools,
       schema: request.outputSchema,
-      prompt: request.promptViaStdin ? undefined : request.prompt,
+      prompt: request.promptViaStdin ? undefined : prompt,
     });
-    const run = spawnSync(this.binary, args, {
-      cwd: request.cwd,
-      input: request.promptViaStdin ? request.prompt : undefined,
-      env: childEnv,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    let run: ReturnType<typeof spawnSync<string>>;
+    try {
+      run = spawnSync(this.binary, args, {
+        cwd: workDir,
+        input: request.promptViaStdin ? prompt : undefined,
+        env: childEnv,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
     if (run.error || !run.stdout) {
       throw new Error(`claude did not run (status ${run.status}): ${run.error ?? run.stderr}`);
     }
