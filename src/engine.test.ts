@@ -38,6 +38,8 @@ import {
   readMarker,
   GhError,
   parseGhFailure,
+  errorMessages,
+  isTransientReviewError,
   postReview,
   SIGNATURE,
   type Deps,
@@ -1156,6 +1158,19 @@ describe("moveCommentsToBody limits", () => {
     expect(moved.body).toContain("1 listed below");
   });
 
+  test("a body already near the limit stays within it, trimming the summary and coverage first", () => {
+    const comments = [{ path: "a.ts", line: 1, side: "RIGHT" as const, body: `Title\n\n${"x".repeat(500)}\n\n${SIGNATURE.finding}` }];
+    for (const extra of [MAX_BODY_CHARS - 400, MAX_BODY_CHARS - 300, MAX_BODY_CHARS - 150, MAX_BODY_CHARS, MAX_BODY_CHARS + 105]) {
+      const big = body("y".repeat(extra - body().length));
+      const moved = moveCommentsToBody({ body: big, comments });
+      expect(moved.body.length).toBeLessThanOrEqual(MAX_BODY_CHARS);
+      expect(moved.body).toContain("all 2 files reviewed");
+      expect(moved.body).toContain("1 listed below");
+      expect(moved.body).toContain(SIGNATURE.review);
+      expect(moved.body.endsWith(marker("abc1234def"))).toBe(true);
+    }
+  });
+
   test("an oversized moved list is cut and keeps the coverage line, marker and signature", () => {
     const comments = Array.from({ length: 200 }, (_, i) => ({
       path: "a.ts",
@@ -1178,12 +1193,50 @@ describe("parseGhFailure", () => {
     expect(parseGhFailure("gh: Validation Failed (HTTP 422)\n", '{"message":"Validation Failed"}')).toEqual({
       status: 422,
       message: "Validation Failed",
+      errors: [],
     });
+  });
+
+  // The body of https://github.com/cli/cli/issues/13358, as `gh api` prints it.
+  const stdout13358 = `{
+  "message": "Validation Failed",
+  "errors": [
+    {
+      "resource": "PullRequestReviewComment",
+      "code": "custom",
+      "field": "pull_request_review_thread.base",
+      "message": "An internal error occurred, please try again."
+    }
+  ],
+  "documentation_url": "https://docs.github.com/rest/pulls/comments#create-a-review-comment-for-a-pull-request",
+  "status": "422"
+}`;
+
+  test("keeps the errors array of a real Validation Failed body", () => {
+    const parsed = parseGhFailure("gh: Validation Failed (HTTP 422)\n", stdout13358);
+    expect(parsed.status).toBe(422);
+    expect(parsed.message).toBe("Validation Failed");
+    expect(errorMessages(parsed.errors)).toEqual(["An internal error occurred, please try again."]);
+  });
+
+  test("a transient error nested in errors[] is transient; a nested validation error is not", () => {
+    const parsed = parseGhFailure("gh: Validation Failed (HTTP 422)\n", stdout13358);
+    const nested = new GhError("failed", parsed.status, parsed.message, parsed.errors);
+    expect(isTransientReviewError(nested)).toBe(true);
+    const line = parseGhFailure(
+      "gh: Validation Failed (HTTP 422)\n",
+      '{"message":"Validation Failed","errors":[{"message":"Line must be part of the diff"}]}',
+    );
+    expect(isTransientReviewError(new GhError("failed", line.status, line.message, line.errors))).toBe(false);
+    // Errors can also be plain strings.
+    const plain = parseGhFailure("gh: Validation Failed (HTTP 422)", '{"message":"Validation Failed","errors":["An internal error occurred, please try again."]}');
+    expect(isTransientReviewError(new GhError("failed", plain.status, plain.message, plain.errors))).toBe(true);
   });
   test("reads the plain form and a missing status", () => {
     expect(parseGhFailure("HTTP 502: Bad Gateway (https://api.github.com/x)")).toEqual({
       status: 502,
       message: "Bad Gateway",
+      errors: [],
     });
     expect(parseGhFailure("error connecting to api.github.com").status).toBeNull();
   });
@@ -1200,7 +1253,7 @@ describe("postReview", () => {
   const validation = () => new GhError("failed", 422, "Unprocessable Entity");
 
   /** Each POST consumes one scripted outcome; a null outcome succeeds. */
-  function setup(outcomes: (GhError | null)[], landed: string[] = []) {
+  function setup(outcomes: (GhError | null)[], landed: ((posted: string) => string)[] = []) {
     const posts: { comments: number; body: string }[] = [];
     const sleeps: number[] = [];
     let listed = 0;
@@ -1214,7 +1267,8 @@ describe("postReview", () => {
           return "";
         }
         listed++;
-        return landed.map((l) => JSON.stringify({ commit_id: SHA, body: l })).join("\n");
+        // What the pull request holds now: `landed` says how each listed review relates to the first POST.
+        return landed.map((l) => JSON.stringify({ commit_id: SHA, body: l(posts[0]?.body ?? "") })).join("\n");
       },
       provider: undefined as never,
       config: loadConfig({}),
@@ -1241,10 +1295,36 @@ describe("postReview", () => {
   });
 
   test("a transient 422 whose POST landed is not posted again", () => {
-    const t = setup([transient()], [`Body\n\n${SIGNATURE.review}`]);
+    // The review that is on the pull request is the one this attempt sent.
+    const t = setup([transient()], [(posted) => posted]);
     postReview(t.deps, "o/r", 1, SHA, inline);
     expect(t.posts).toHaveLength(1);
     expect(t.listed()).toBe(1);
+  });
+
+  test("an older signed review of the same commit does not count as landed", () => {
+    const older = `Older.\n\n${SIGNATURE.review}\n\n<!-- wachi:attempt id=11111111-1111-4111-8111-111111111111 -->`;
+    const t = setup([transient(), null], [() => older]);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    expect(t.posts).toHaveLength(2);
+    expect(t.listed()).toBe(1);
+  });
+
+  test("every attempt id is unique to its postReview call, shared by its retries", () => {
+    const id = (body: string) => body.match(/wachi:attempt id=([0-9a-f-]{36})/)?.[1];
+    const t = setup([transient(), null, null]);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    const ids = t.posts.map((p) => id(p.body));
+    expect(ids[0]).toBeDefined();
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  test("the attempt line after the marker keeps the marker readable", () => {
+    const t = setup([null]);
+    postReview(t.deps, "o/r", 1, SHA, { body: `Body\n\n${SIGNATURE.review}\n\n${marker(SHA)}`, comments: [] });
+    expect(readMarker(t.posts[0].body)).toBe(SHA);
   });
 
   test("a validation 422 moves the comments to the body", () => {
