@@ -836,11 +836,14 @@ export function listFiles(gh: GhFn, repo: string, pr: number): PrFile[] {
  * ones are another workflow's and are ignored. Drop the unsigned branch once the cutoff has passed.
  */
 export function lastReviewedSha(gh: GhFn, repo: string, pr: number) {
-  const jq = '.[] | select(.user.login == "github-actions[bot]") | {body, created_at} | @json';
-  const reviews = jsonLines<{ body: string | null; created_at?: string }>(
+  // A review object has no `created_at`: its time is `submitted_at`.
+  const jq = '.[] | select(.user.login == "github-actions[bot]") | {body, submitted_at} | @json';
+  const reviews = jsonLines<{ body: string | null; submitted_at?: string | null }>(
     gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/reviews`, "--jq", jq]),
   );
-  return lastEngineMarker(reviews.map((r) => ({ body: r.body ?? "", created_at: r.created_at })));
+  return lastEngineMarker(
+    reviews.map((r) => ({ body: r.body ?? "", created_at: r.submitted_at ?? undefined })),
+  );
 }
 
 /** The marker of the last review the engine wrote, among `github-actions[bot]` reviews in order. */

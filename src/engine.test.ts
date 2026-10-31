@@ -48,9 +48,9 @@ const file = (filename: string, additions: number, deletions = 0, patch = ""): P
 
 // `gh api` with a jq filter prints one JSON string per line: here, the bodies of the bot's reviews.
 /** `reviews` as `gh` prints them: a body alone is dated before the legacy cutoff. */
-const fakeReviews = (reviews: (string | { body: string; created_at: string })[]) => () =>
+const fakeReviews = (reviews: (string | { body: string; submitted_at: string })[]) => () =>
   reviews
-    .map((r) => JSON.stringify(typeof r === "string" ? { body: r, created_at: "2026-09-01T00:00:00Z" } : r))
+    .map((r) => JSON.stringify(typeof r === "string" ? { body: r, submitted_at: "2026-09-01T00:00:00Z" } : r))
     .join("\n");
 
 const output = (over: Partial<ReviewOutput> = {}): ReviewOutput => ({
@@ -673,10 +673,13 @@ describe("lastReviewedSha ownership", () => {
 
   test("an unsigned review in the old format after the cutoff is an imitation and is ignored", () => {
     const body = `Review.\n\n<sub>m · $0.01</sub>\n\n${marker("fake999")}`;
-    const after = fakeReviews([{ body, created_at: "2026-11-01T00:00:00Z" }]);
+    const after = fakeReviews([{ body, submitted_at: "2026-11-01T00:00:00Z" }]);
     expect(lastReviewedSha(after, "o/r", 1)).toBeNull();
-    const before = fakeReviews([{ body, created_at: "2026-10-31T23:59:59Z" }]);
+    const before = fakeReviews([{ body, submitted_at: "2026-10-31T23:59:59Z" }]);
     expect(lastReviewedSha(before, "o/r", 1)).toBe("fake999");
+    // A review object carries `submitted_at`; a `created_at` field is not read for reviews.
+    const wrongField = () => JSON.stringify({ body, created_at: "2026-10-31T23:59:59Z" });
+    expect(lastReviewedSha(wrongField, "o/r", 1)).toBeNull();
     // No date at all is not trusted either.
     expect(lastEngineMarker([{ body }])).toBeNull();
   });
