@@ -18,7 +18,7 @@
  * Why: a change to the prompt rules has to show it lowers false positives without hiding real
  * findings, and the owner's verdicts are the only ground truth available.
  */
-import { defaultGh, type GhFn } from "./engine";
+import { defaultGh, isWachiFinding, type GhFn } from "./engine";
 
 export type Verdict = "correct" | "partial" | "wrong" | "unjudged";
 
@@ -66,6 +66,7 @@ export interface RawComment {
   pull_request_review_id?: number | null;
   user: { login: string };
   body: string;
+  created_at?: string;
 }
 
 export interface Judged {
@@ -81,7 +82,10 @@ export function judge(
   modelOfReview: Map<number, string>,
   botLogin = "github-actions[bot]",
 ): Judged[] {
-  const roots = comments.filter((c) => c.user.login === botLogin && !c.in_reply_to_id);
+  // Signed roots, and unsigned ones in the old label format from before `LEGACY_CUTOFF` (see `isWachiFinding`).
+  const roots = comments.filter(
+    (c) => c.user.login === botLogin && !c.in_reply_to_id && isWachiFinding(c.body, c.created_at),
+  );
   return roots.flatMap((root) => {
     const label = parseLabel(root.body);
     if (!label) return [];

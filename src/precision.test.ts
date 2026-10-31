@@ -46,10 +46,11 @@ test("parseModel reads the review footer", () => {
 describe("judge and report", () => {
   const bot = { login: "github-actions[bot]" };
   const owner = { login: "csdev19" };
+  const old = "2026-09-01T00:00:00Z";
   const comments: RawComment[] = [
-    { id: 1, pull_request_review_id: 9, user: bot, body: "🟠🐛 **Fix · bug: a**" },
-    { id: 2, pull_request_review_id: 9, user: bot, body: "🟡📜 **Consider · rules: b**" },
-    { id: 3, pull_request_review_id: 9, user: bot, body: "🟡🧹 **Consider · cleanup: c**" },
+    { id: 1, pull_request_review_id: 9, user: bot, body: "🟠🐛 **Fix · bug: a**", created_at: old },
+    { id: 2, pull_request_review_id: 9, user: bot, body: "🟡📜 **Consider · rules: b**", created_at: old },
+    { id: 3, pull_request_review_id: 9, user: bot, body: "🟡🧹 **Consider · cleanup: c**", created_at: old },
     { id: 4, in_reply_to_id: 1, user: owner, body: "**Verdict: wrong (false positive).**" },
     { id: 5, in_reply_to_id: 2, user: owner, body: "**Verdict: correct.**" },
     // A bot reply in its own thread is never read as a verdict.
@@ -63,6 +64,22 @@ describe("judge and report", () => {
       { severity: "consider", topic: "rules", model: "Claude Sonnet 5.5", verdict: "correct" },
       { severity: "consider", topic: "cleanup", model: "Claude Sonnet 5.5", verdict: "unjudged" },
     ]);
+  });
+
+  test("takes signed roots, and leaves out another workflow's comment", () => {
+    const signed = "🟠🐛 **Fix · bug: s**\n\n<!-- wachi:finding -->";
+    const found = judge(
+      [
+        { id: 1, user: bot, body: signed },
+        // Same label, but signed as something else: not a finding.
+        { id: 2, user: bot, body: "🟠🐛 **Fix · bug: f**\n\n<!-- wachi:reply -->" },
+        { id: 3, user: bot, body: "Lint failed" },
+        // The old unsigned format, created after the cutoff: an imitation.
+        { id: 4, user: bot, body: "🟠🐛 **Fix · bug: i**", created_at: "2026-11-01T00:00:00Z" },
+      ],
+      new Map(),
+    );
+    expect(found).toEqual([{ severity: "fix", topic: "bug", model: "unknown", verdict: "unjudged" }]);
   });
 
   test("precision counts only judged findings, a partial one as half", () => {
