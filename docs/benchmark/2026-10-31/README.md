@@ -64,6 +64,27 @@ it calls (`markCopySeen`, `library:changed`), read the contract, then write the 
 Turn count is not the explanation either: Wachi used 7 turns on #465's batch and 8 to 11 on
 #467's. Budget is not the constraint: no batch spent more than $0.42 of its $0.75 cap.
 
+## What Pullfrog misses, and why
+
+The other direction matters as much. Pullfrog missed 15 of Wachi's 17 valid findings, including
+one of #463's two serious bugs.
+
+- **It reviews depth-first and stops.** It follows a few functional questions to the end and
+  posts only what it confirmed ("bug-only, high-confidence" in its own words on #463). Whatever it
+  did not go looking for, it does not see.
+- **It skips tests, comments and docs as review targets.** None of Wachi's test-quality findings
+  (a test that passes either way, a test named for a case it never runs, an untested badge path) or
+  stale comments appear in Pullfrog's reviews.
+- **It checks the happy path of what it traces.** On #464 it checked the sidebar's
+  `wasOnLibrary` ref and judged the lifecycle fine, without trying list view or a filter (Wachi's
+  finding). On #463 it checked the camera reopen failure at the store level and never followed it
+  into the main-process hub, where Wachi found the face lost from the recording.
+
+**What it represents.** The two reviewers make opposite trade-offs. Pullfrog spends on depth
+along a few paths; Wachi spends on breadth, because its engine guarantees every file is read.
+Neither covers the other. The improvements below keep Wachi's breadth and add the one question
+that gave Pullfrog its depth, instead of turning Wachi into an explorer.
+
 ## Improvements this suggests
 
 Ranked, after Sol's review of the first list.
@@ -108,6 +129,10 @@ Partly, and only where a pattern repeats in one repository.
   and are examples with no authority (ADR 0006), so they cannot mute a finding.
 
 ## Data
+
+Raw reviews, inline comments and Pullfrog's tool calls (the `» ` lines of each run log,
+cut at 400 characters) are kept in [raw/](raw/), because GitHub expires Actions logs.
+
 
 Runs (niway-dev/kaipu-record Actions): Wachi 41153055286 (#463), 41153536509 (#464),
 41153716355 (#465), 41153724626 (#466), 41153836694 (#467). Pullfrog first runs 41153059096,

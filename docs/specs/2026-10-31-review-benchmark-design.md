@@ -100,6 +100,38 @@ benchmark, one folder per day: [2026-10-31](../benchmark/2026-10-31/README.md) (
 #463–#467). They are not blind and have no seeded ground truth, but they show where the two
 reviewers differ and feed the benchmark's cross-file class.
 
+## Exhibition replay
+
+A public, side-by-side demonstration on the PRs of the
+[2026-10-31 field benchmark](../benchmark/2026-10-31/README.md), run after the improvements it
+ranks (contract check, peer call sites, focus-file memory, ADR path) ship in a Wachi release.
+
+**Method.** For each PR, push two branches that point at the commits both reviewers saw: a base
+branch at the original base commit and a head branch at the original head commit. No commit is
+rewritten, so the diff is byte-identical to the one reviewed on 2026-10-31. Open a PR from head to
+base titled `[replay] <original title>`, labelled `replay`, never merged and closed once both
+reviews are in.
+
+| PR | Base commit | Head commit | Files | Why it is in the replay |
+| --- | --- | --- | --- | --- |
+| #464 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `e45c845143ba72f35fea4fac2f9d62a186dff986` | 31 | Precedent and contract in the same batch |
+| #465 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `dac8318b631e64780f65ce94b4aaa57261d7d63d` | 14 | Precedent outside the diff; smallest |
+| #467 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `b12d760bd90b1e9619bab115f500f9c1a30cccf3` | 47 | Background flow across main and renderer |
+| #463 | `c58b68f437293377f0188e6c460ad782a313dbb1` | `3ec7a138c3a878b38284fd13c801ab7226a34abb` | 23 | Control: Wachi already caught a serious bug here |
+| #466 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `b2705a9ce2593b29ae50235312a4226955bbbb36` | 28 | Lifecycle (remount) |
+
+Each base commit was checked to be an ancestor of its head, and the file counts match the
+original reviews.
+
+**Where.** In niway-dev/kaipu-record, where both apps are installed. Pullfrog's stored learnings
+for that repository now include what its runs learned on these PRs (its #464 run added three
+sections), and kaipu's focus file will carry the new memory lines, so both reviewers come in with
+priors. The exhibition reports that and makes no generalisation claim; the controlled benchmark,
+in fresh repositories, is where claims are made.
+
+**Score.** Same table as the field benchmark, plus one column per original Pullfrog-only bug:
+did each reviewer find it. Several Wachi runs per PR, since one run can be lucky.
+
 ## Sources
 
 - [Greptile benchmarks](https://www.greptile.com/benchmarks) (SZZ-style replay of real fixes)
