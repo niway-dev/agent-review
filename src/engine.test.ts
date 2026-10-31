@@ -36,7 +36,14 @@ import {
   openBotThreads,
   parseCommand,
   readMarker,
+  GhError,
+  parseGhFailure,
+  postReview,
+  SIGNATURE,
+  type Deps,
+  type Review,
 } from "./engine";
+import { loadConfig } from "./config";
 
 // Synthetic pull requests only: these tests never call GitHub or an agent.
 const file = (filename: string, additions: number, deletions = 0, patch = ""): PrFile => ({
@@ -1134,4 +1141,130 @@ describe("buildReview body size", () => {
     });
     expect(review.body).toContain("Not reviewed: `a.ts`.");
   });
+});
+
+describe("moveCommentsToBody limits", () => {
+  const body = (extra = "") =>
+    `**Agent review** of the whole pull request, at \`abc1234\`: all 2 files reviewed.\n\n1 finding(s): 1 to fix; 1 on their lines. Reply in a comment's thread to answer it.\n\n### Summary\n\nOk.${extra}\n\n${SIGNATURE.review}\n\n${marker("abc1234def")}`;
+
+  test("states that the comments moved instead of claiming inline ones", () => {
+    const moved = moveCommentsToBody({
+      body: body(),
+      comments: [{ path: "a.ts", line: 3, side: "RIGHT", body: "X\n\nY" }],
+    });
+    expect(moved.body).not.toContain("on their lines. Reply");
+    expect(moved.body).toContain("1 listed below");
+  });
+
+  test("an oversized moved list is cut and keeps the coverage line, marker and signature", () => {
+    const comments = Array.from({ length: 200 }, (_, i) => ({
+      path: "a.ts",
+      line: i + 1,
+      side: "RIGHT" as const,
+      body: `Title ${i}\n\n${"x".repeat(1000)}\n\n${SIGNATURE.finding}`,
+    }));
+    const moved = moveCommentsToBody({ body: body(), comments });
+    expect(moved.body.length).toBeLessThanOrEqual(MAX_BODY_CHARS);
+    expect(moved.body).toMatch(/- … and \d+ more not shown/);
+    expect(moved.body).toContain("all 2 files reviewed");
+    expect(moved.body).toContain(SIGNATURE.review);
+    expect(moved.body).toContain(marker("abc1234def"));
+    expect(moved.comments).toEqual([]);
+  });
+});
+
+describe("parseGhFailure", () => {
+  test("reads the wrapped API error", () => {
+    expect(parseGhFailure("gh: Validation Failed (HTTP 422)\n", '{"message":"Validation Failed"}')).toEqual({
+      status: 422,
+      message: "Validation Failed",
+    });
+  });
+  test("reads the plain form and a missing status", () => {
+    expect(parseGhFailure("HTTP 502: Bad Gateway (https://api.github.com/x)")).toEqual({
+      status: 502,
+      message: "Bad Gateway",
+    });
+    expect(parseGhFailure("error connecting to api.github.com").status).toBeNull();
+  });
+});
+
+describe("postReview", () => {
+  const SHA = "abc1234def";
+  const inline: Review = {
+    body: `Body\n\n${SIGNATURE.review}`,
+    comments: [{ path: "a.ts", line: 3, side: "RIGHT", body: `Fix\n\n${SIGNATURE.finding}` }],
+  };
+  const transient = () =>
+    new GhError("failed", 422, "An internal error occurred, please try again.");
+  const validation = () => new GhError("failed", 422, "Unprocessable Entity");
+
+  /** Each POST consumes one scripted outcome; a null outcome succeeds. */
+  function setup(outcomes: (GhError | null)[], landed: string[] = []) {
+    const posts: { comments: number; body: string }[] = [];
+    const sleeps: number[] = [];
+    let listed = 0;
+    const deps: Deps = {
+      gh: (args, input) => {
+        if (args.includes("POST")) {
+          const payload = JSON.parse(input ?? "{}");
+          const outcome = outcomes[posts.length];
+          posts.push({ comments: payload.comments.length, body: payload.body });
+          if (outcome) throw outcome;
+          return "";
+        }
+        listed++;
+        return landed.map((l) => JSON.stringify({ commit_id: SHA, body: l })).join("\n");
+      },
+      provider: undefined as never,
+      config: loadConfig({}),
+      log: () => {},
+      warn: () => {},
+      sleep: (ms) => void sleeps.push(ms),
+    };
+    return { deps, posts, sleeps, listed: () => listed };
+  }
+
+  test("a transient 422 is retried after 1 s and the review lands once", () => {
+    const t = setup([transient(), null]);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    expect(t.sleeps).toEqual([1000]);
+    expect(t.posts).toHaveLength(2);
+    expect(t.posts.every((p) => p.comments === 1)).toBe(true);
+  });
+
+  test("waits 1 s then 3 s, then gives up with the transient error", () => {
+    const t = setup([transient(), transient(), transient()]);
+    expect(() => postReview(t.deps, "o/r", 1, SHA, inline)).toThrow(GhError);
+    expect(t.sleeps).toEqual([1000, 3000]);
+    expect(t.posts).toHaveLength(3);
+  });
+
+  test("a transient 422 whose POST landed is not posted again", () => {
+    const t = setup([transient()], [`Body\n\n${SIGNATURE.review}`]);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    expect(t.posts).toHaveLength(1);
+    expect(t.listed()).toBe(1);
+  });
+
+  test("a validation 422 moves the comments to the body", () => {
+    const t = setup([validation(), null]);
+    postReview(t.deps, "o/r", 1, SHA, inline);
+    expect(t.sleeps).toEqual([]);
+    expect(t.posts.map((p) => p.comments)).toEqual([1, 0]);
+    expect(t.posts[1]?.body).toContain("`a.ts:3`");
+  });
+
+  for (const [name, error] of [
+    ["401", new GhError("failed", 401, "Bad credentials")],
+    ["403", new GhError("failed", 403, "Resource not accessible by integration")],
+    ["network", new GhError("failed", null, "")],
+  ] as const) {
+    test(`${name} is rethrown and nothing degraded is posted`, () => {
+      const t = setup([error]);
+      expect(() => postReview(t.deps, "o/r", 1, SHA, inline)).toThrow(error);
+      expect(t.posts).toHaveLength(1);
+      expect(t.sleeps).toEqual([]);
+    });
+  }
 });

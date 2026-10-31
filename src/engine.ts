@@ -663,19 +663,40 @@ export function buildReview(input: {
   return { body: body.replace(fullList, () => fitList(list, Math.max(room, 0))), comments };
 }
 
-/** For a review GitHub refused (422): every inline finding moves to the body. */
+/**
+ * For a review GitHub refused with a validation 422: every inline finding moves to the body. The
+ * result stays within `MAX_BODY_CHARS`: when the moved list does not fit, it is cut and ends with
+ * "N more not shown", so the coverage line, the marker and the signature are never dropped. The
+ * count line stops claiming inline comments, since none are left inline.
+ */
 export function moveCommentsToBody(review: Review): Review {
   if (review.comments.length === 0) return review;
   const moved = review.comments.map(
     (c) => `- \`${neutralise(c.path)}:${c.line}\`: ${c.body.replace(SIGNATURE.finding, "").trim().replace(/\n\n/, " ")}`,
   );
-  const section = `### On their lines (GitHub refused them inline)\n\n${moved.join("\n")}`;
-  const summary = review.body.indexOf("\n\n### Summary");
-  const body =
-    summary === -1
-      ? `${review.body}\n\n${section}`
-      : `${review.body.slice(0, summary)}\n\n${section}${review.body.slice(summary)}`;
-  return { body, comments: [] };
+  const base = review.body.replace(
+    /; \d+ on their lines\. Reply in a comment's thread to answer it\./,
+    `; ${moved.length} listed below, because GitHub would not anchor them on their lines.`,
+  );
+  const heading = "### On their lines (GitHub refused them inline)";
+  const summary = base.indexOf("\n\n### Summary");
+  const head = summary === -1 ? base : base.slice(0, summary);
+  const tail = summary === -1 ? "" : base.slice(summary);
+  const note = (left: number) => `- … and ${left} more not shown (GitHub refused them inline).`;
+  // The section is "\n\n<heading>\n\n<items joined by \n>" between head and tail.
+  const room = MAX_BODY_CHARS - head.length - tail.length - heading.length - 4;
+  const kept: string[] = [];
+  let used = 0;
+  for (const [i, item] of moved.entries()) {
+    const next = used + (kept.length > 0 ? 1 : 0) + item.length;
+    const left = moved.length - (i + 1);
+    if (next + (left > 0 ? 1 + note(left).length : 0) > room) break;
+    kept.push(item);
+    used = next;
+  }
+  if (kept.length < moved.length) kept.push(note(moved.length - kept.length));
+  const section = `${heading}\n\n${kept.join("\n")}`;
+  return { body: `${head}\n\n${section}${tail}`, comments: [] };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -788,9 +809,45 @@ function repoFocus(warn: (line: string) => void, repoDir: string) {
 /** Runs `gh` and returns stdout; swapped for a stub in tests. */
 export type GhFn = (args: string[], input?: string) => string;
 
+/** A failed `gh` call, with what GitHub answered when it was an API error. */
+export class GhError extends Error {
+  constructor(
+    message: string,
+    /** The HTTP status of the API response, or null when `gh` failed without one (network, auth setup). */
+    readonly status: number | null,
+    /** GitHub's own message, without `gh`'s wrapping. Empty when there was none. */
+    readonly ghMessage: string,
+  ) {
+    super(message);
+    this.name = "GhError";
+  }
+}
+
+/**
+ * Reads the status and message out of what `gh api` printed. On an API error `gh` writes
+ * `gh: <message> (HTTP <status>)` to stderr and the response JSON to stdout; for a body it cannot
+ * read it writes `HTTP <status>: <text> (<url>)`. Anything else (no network, bad token setup) has
+ * no status.
+ */
+export function parseGhFailure(stderr: string, stdout = ""): { status: number | null; message: string } {
+  let message = "";
+  try {
+    const m = JSON.parse(stdout)?.message;
+    if (typeof m === "string") message = m;
+  } catch {}
+  const wrapped = stderr.match(/^gh: (.*?) \(HTTP (\d{3})\)/m);
+  if (wrapped) return { status: Number(wrapped[2]), message: message || wrapped[1] };
+  const plain = stderr.match(/HTTP (\d{3}): (.*?)(?: \(https?:\/\/\S+\))?$/m);
+  if (plain) return { status: Number(plain[1]), message: message || plain[2] };
+  return { status: null, message };
+}
+
 export const defaultGh: GhFn = (args, input) => {
   const run = spawnSync("gh", args, { input, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  if (run.status !== 0) throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${run.stderr}`);
+  if (run.status !== 0) {
+    const { status, message } = parseGhFailure(run.stderr ?? "", run.stdout ?? "");
+    throw new GhError(`gh ${args.slice(0, 3).join(" ")} failed: ${run.stderr}`, status, message);
+  }
   return run.stdout;
 };
 
@@ -807,7 +864,11 @@ export interface Deps {
   repoDir?: string;
   log: (line: string) => void;
   warn: (line: string) => void;
+  /** Waits `ms` between review POST retries; swapped for a no-op in tests. Default: blocks the thread. */
+  sleep?: (ms: number) => void;
 }
+
+const blockingSleep = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 const jsonLines = <T>(text: string) =>
   text
@@ -928,23 +989,69 @@ export function openThreads(gh: GhFn, repo: string, pr: number) {
   return openBotThreads(JSON.parse(raw).data.repository.pullRequest.reviewThreads.nodes);
 }
 
-function postReview(deps: Deps, repo: string, pr: number, headSha: string, review: Review) {
+/** Waits before the 1st and 2nd retry of a review POST GitHub answered with a transient error. */
+export const REVIEW_RETRY_DELAYS_MS = [1_000, 3_000];
+
+const ghStatus = (error: unknown) => (error instanceof GhError ? error.status : null);
+
+/** GitHub's generic "An internal error occurred, please try again." 422: the review itself is fine. */
+export function isTransientReviewError(error: unknown) {
+  return (
+    error instanceof GhError &&
+    error.status === 422 &&
+    /internal error occurred, please try again/i.test(error.ghMessage || error.message)
+  );
+}
+
+/** Whether a review signed by the engine for this head is already on the pull request. */
+function reviewLanded(deps: Deps, repo: string, pr: number, headSha: string) {
+  const jq = '.[] | select(.user.login == "github-actions[bot]") | {commit_id, body} | @json';
+  const reviews = jsonLines<{ commit_id: string; body: string | null }>(
+    deps.gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/reviews`, "--jq", jq]),
+  );
+  return reviews.some((r) => r.commit_id === headSha && (r.body ?? "").includes(SIGNATURE.review));
+}
+
+export function postReview(deps: Deps, repo: string, pr: number, headSha: string, review: Review) {
   if (deps.config.dryRun) {
     deps.log(`--- review at ${short(headSha)} ---\n${review.body}`);
     for (const c of review.comments) deps.log(`--- ${c.path}:${c.line} ---\n${c.body}`);
     return;
   }
+  const sleep = deps.sleep ?? blockingSleep;
   const send = (r: Review) =>
     deps.gh(
       ["api", "-X", "POST", `repos/${repo}/pulls/${pr}/reviews`, "--input", "-"],
       JSON.stringify({ commit_id: headSha, event: "COMMENT", body: r.body, comments: r.comments }),
     );
+  // A transient error may hide a POST that did land, so look before each retry.
+  const sendWithRetry = (r: Review) => {
+    for (let retry = 0; ; retry++) {
+      try {
+        send(r);
+        return;
+      } catch (error) {
+        const delay = REVIEW_RETRY_DELAYS_MS[retry];
+        if (!isTransientReviewError(error) || delay === undefined) throw error;
+        deps.warn(`GitHub answered with a transient error; retrying in ${delay / 1000} s. ${error}`);
+        sleep(delay);
+        if (reviewLanded(deps, repo, pr, headSha)) {
+          deps.warn("The review was posted despite the error; not posting it again.");
+          return;
+        }
+      }
+    }
+  };
   try {
-    send(review);
+    sendWithRetry(review);
   } catch (error) {
-    if (review.comments.length === 0) throw error;
+    // Only a validation 422 (a line GitHub cannot anchor) justifies a different review. Auth,
+    // permission, network, rate limit and an exhausted transient error fail loudly instead.
+    if (ghStatus(error) !== 422 || isTransientReviewError(error) || review.comments.length === 0) {
+      throw error;
+    }
     deps.warn(`GitHub refused the inline comments; posting them in the body. ${error}`);
-    send(moveCommentsToBody(review));
+    sendWithRetry(moveCommentsToBody(review));
   }
 }
 
