@@ -1,8 +1,8 @@
 # Review benchmark: Wachi, Pullfrog and CodeRabbit on kaipu-record's real bugs
 
 - **Status:** proposed 2026-10-31. The bug catalogue exists; no benchmark repository has been
-  created and no bug has been verified by hand yet. One side-by-side observation on a live PR is
-  recorded below.
+  created and no bug has been verified by hand yet. Side-by-side observations on live PRs are
+  recorded under `docs/benchmark/<date>/`.
 - **Date:** 2026-10-31
 - **Creates:** no ADR.
 - **Refs:** #43; [bug catalogue](../benchmark/kaipu-record-bug-catalogue.md)
@@ -93,52 +93,44 @@ Catalogue limits: Linear tickets (NIW2-…) were not readable; fixes in #17–#2
 split by hand; difficulty was judged by the mining agents; the app was not run. Some introducing
 PRs are large (#402: 26 files, +1,820 lines).
 
-## Field observation: kaipu-record#467 (2026-10-31)
+## Field observations
 
-Not part of the benchmark: one live PR where both Wachi and Pullfrog reviewed the same head. It
-is recorded because it already shows the kind of difference the benchmark has to measure.
+Live PRs where Wachi and Pullfrog reviewed the same head are recorded outside the controlled
+benchmark, one folder per day: [2026-10-31](../benchmark/2026-10-31/README.md) (kaipu-record
+#463–#467). They are not blind and have no seeded ground truth, but they show where the two
+reviewers differ and feed the benchmark's cross-file class.
 
-**Setup.** [niway-dev/kaipu-record#467](https://github.com/niway-dev/kaipu-record/pull/467),
-"Export screen with its own rail entry (replaces Prepare)", 47 files, +2,676/−2,177, head
-`b12d760`. Both ran Claude Opus 5.5. Wachi was the pre-phase-0 version on kaipu's workflow.
+## Exhibition replay
 
-| | Wachi | Pullfrog |
-| --- | --- | --- |
-| Run | 01:08:21–01:11:24 (3 min 3 s) | 01:08:22–01:12:16 (3 min 54 s) |
-| Review posted | 01:11:18 | 01:11:53 |
-| Cost | $1.36 (6 batches) | $1.96 (45 turns, effort high) |
-| Findings | 8 (3 fix, 5 consider) | 1 (important) |
+A public, side-by-side demonstration on the PRs of the
+[2026-10-31 field benchmark](../benchmark/2026-10-31/README.md), run after the improvements it
+ranks (contract check, peer call sites, focus-file memory, ADR path) ship in a Wachi release.
 
-**Did Wachi's review influence Pullfrog?** No. Pullfrog's log shows only local reads of its diff
-file, greps, and its own MCP calls (`select_mode`, `checkout_pr`, `git`,
-`create_pull_request_review`). It never listed the PR's reviews or comments. Its finding was
-already written in its summary file at 01:11:14.9, before Wachi posted at 01:11:18. The posted
-body is identical to its first draft at 01:11:34, which a coverage nudge rejected once. Wachi
-reads no other bot's comments and posted first.
+**Method.** For each PR, push two branches that point at the commits both reviewers saw: a base
+branch at the original base commit and a head branch at the original head commit. No commit is
+rewritten, so the diff is byte-identical to the one reviewed on 2026-10-31. Open a PR from head to
+base titled `[replay] <original title>`, labelled `replay`, never merged and closed once both
+reviews are in.
 
-**Were the findings valid?** Each was checked against the code at `b12d760`, by reading, not by
-running the app.
-
-| # | Bot | Finding | Valid | Weight |
+| PR | Base commit | Head commit | Files | Why it is in the replay |
 | --- | --- | --- | --- | --- |
-| P1 | Pullfrog | Export never re-lists the Library when a background export finishes: no `library:changed` on `recordingFinalize`, unlike library-detail's refresh on `runner.ready`. The card never reads "Ready" and Enter encodes the same copy again. Also: `if (isLoading)` unmounts the screen on any refresh and loses the picked destination | Yes. `recording-hub.ts` finalize does not broadcast; `export-page.tsx` has no `ready` refresh; `refresh()` sets `isLoading` | **The one user-facing functional bug** |
-| W1 | Wachi | "Pick from Library" stays enabled while a dropped file imports; two navigations race | Yes (`export-drop-zone.tsx`: only Browse is disabled) | minor |
-| W2 | Wachi | GitHub size bar's `role="img"` label omits the fits/over verdict | Yes (`barLabel` has only from/to) | a11y |
-| W3 | Wachi | Picker is `role="dialog"` without focus management | Yes | a11y |
-| W4 | Wachi | Running row in Recent exports shows the title where finished rows show the destination | Yes | cosmetic |
-| W5 | Wachi | "does not take a video dropped on the window" passes either way: the default `pathForFile` stub returns "" so `importVideoFiles` is never reached | Yes (`use-import-videos.ts`) | test quality |
-| W6 | Wachi | Sidebar test named "with and without a video" renders only `/export/asset-1` | Yes | test quality |
-| W7 | Wachi | Badge's in-progress count (`status === "exporting"`) is untested | Yes | test quality |
-| W8 | Wachi | Orphaned CSS comment for the removed drop strip | Yes | docs |
+| #464 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `e45c845143ba72f35fea4fac2f9d62a186dff986` | 31 | Precedent and contract in the same batch |
+| #465 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `dac8318b631e64780f65ce94b4aaa57261d7d63d` | 14 | Precedent outside the diff; smallest |
+| #467 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `b12d760bd90b1e9619bab115f500f9c1a30cccf3` | 47 | Background flow across main and renderer |
+| #463 | `c58b68f437293377f0188e6c460ad782a313dbb1` | `3ec7a138c3a878b38284fd13c801ab7226a34abb` | 23 | Control: Wachi already caught a serious bug here |
+| #466 | `13b7ff5da65f3d0b59d0542132babf328ce373b3` | `b2705a9ce2593b29ae50235312a4226955bbbb36` | 28 | Lifecycle (remount) |
 
-**Reading.** All nine findings hold. Wachi produced more, valid ones, mostly test, accessibility
-and hygiene issues, at lower cost. It missed the only finding that changes what a user sees.
-That bug needs three files that were not in the same batch: the new page, the main-process
-finalize handler, and the library-detail precedent. This is the case the precomputed change
-impact idea (research note) and cross-batch contracts are meant to cover, and it is a concrete
-input to the benchmark's cross-file class. One more possible miss by both, unverified: finished
-Email copies in Recent exports are named through `destinationOfPreset("balanced")`, which
-returns `chat`, so they may read "Slack · Discord".
+Each base commit was checked to be an ancestor of its head, and the file counts match the
+original reviews.
+
+**Where.** In niway-dev/kaipu-record, where both apps are installed. Pullfrog's stored learnings
+for that repository now include what its runs learned on these PRs (its #464 run added three
+sections), and kaipu's focus file will carry the new memory lines, so both reviewers come in with
+priors. The exhibition reports that and makes no generalisation claim; the controlled benchmark,
+in fresh repositories, is where claims are made.
+
+**Score.** Same table as the field benchmark, plus one column per original Pullfrog-only bug:
+did each reviewer find it. Several Wachi runs per PR, since one run can be lucky.
 
 ## Sources
 
