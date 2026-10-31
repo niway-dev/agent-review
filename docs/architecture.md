@@ -47,8 +47,10 @@ All names are in `src/engine.ts` unless a file is given.
    `<!-- agent-review sha=... -->` marker (the old `claude-review` marker is still read) in the
    tool's own reviews. A review is the tool's only if `github-actions[bot]` wrote it and it
    carries the `<!-- wachi:review -->` signature, because every workflow of the repository posts
-   as that same account; the last marker in the body counts. Reviews posted before signatures
-   existed are read by their marker only while they come before the first signed review; if that commit is behind the head, `compareFiles` narrows the review to what
+   as that same account. The marker counts only as the last line of the body, right after the
+   signature (`readSignedMarker`); one anywhere else is ignored. Reviews posted before signatures
+   existed (marker right after `</sub>`) are read only while they come before the first signed
+   review and were created before `LEGACY_CUTOFF` (2026-11-01); if that commit is behind the head, `compareFiles` narrows the review to what
    changed since (`status === "ahead"`), otherwise it reviews the whole pull request. `resolveScope`
    turns `review <paths>` words into paths and ignores words that name no changed file.
    `filterFiles` then drops `DEFAULT_EXCLUDE` (lockfiles, build output, snapshots, source maps,
@@ -128,8 +130,10 @@ All names are in `src/engine.ts` unless a file is given.
    It writes a first line saying whether coverage is complete or partial, the summary, a "Coverage
    by batch" table, a footer with the model label, batch count and cost, and, only for a complete,
    unscoped review, the marker for the next incremental run. Every piece of model text (summary,
-   finding titles and bodies, thread replies, answers) goes through `neutralise`, which turns
-   `<!--` and `-->` into entities, so the model cannot write a marker or a signature. The engine
+   finding titles and bodies, thread replies, answers) and every repository-controlled string
+   (file names in the lists and the moved findings, batch labels, skip reasons) goes through
+   `neutralise`, which turns `<!--` and `-->` into entities, so neither the model nor a file name
+   can write a marker or a signature. The engine
    adds the signatures itself: `<!-- wachi:review -->` in the review body, `<!-- wachi:finding -->`
    in each inline comment, `<!-- wachi:reply -->` in each thread reply. The body is kept under
    `MAX_BODY_CHARS`, shortening only the list of unreviewed files (`fitList`). `refuseLeak` asks
@@ -148,8 +152,8 @@ All names are in `src/engine.ts` unless a file is given.
    free-text output, the pull request metadata and full diff in a scratch directory, the same leak
    check, posted as a pull request comment. Thread replies work through the review path: with a
    previous marker, `openThreads` fetches the tool's unresolved threads (first comment by `github-actions` and
-   carrying the finding signature, or, during the deprecation window, an unsigned comment in the
-   old label format) and `openBotThreads` keeps only replies from `OWNER`, `MEMBER` or `COLLABORATOR`, so a stranger's reply on a public
+   carrying the finding signature, or, until `LEGACY_CUTOFF`, an unsigned comment in the
+   old label format created before that date) and `openBotThreads` keeps only replies from `OWNER`, `MEMBER` or `COLLABORATOR`, so a stranger's reply on a public
    repository never reaches the model. `assignThreads` hands each thread to the batch that holds
    its file. *Why:* the operator gate is enforced twice (workflow and CLI) because only one of
    them can fail loudly.
@@ -283,8 +287,9 @@ and the copy-the-files install. The two sets must stay equal.
   every file is accounted for.
 - Model text is neutralised (`neutralise`) before it is posted, and ownership of a review or a
   thread is the `github-actions[bot]` login plus an engine-written signature, never the login
-  alone. The unsigned legacy branches (`lastEngineMarker`, `isWachiFinding`) are a deprecation
-  window for items posted before signatures existed.
+  alone. The unsigned legacy branches (`lastEngineMarker`, `isWachiFinding`, `precision.ts`) are a
+  deprecation window for items created before `LEGACY_CUTOFF` (2026-11-01); an unsigned item after
+  it is treated as another workflow's imitation. Delete the branches once the date has passed.
 - The reviewed head is never the engine's working directory, and the engine never executes
   anything from it.
 - The agent gets read tools only, an allowlisted environment and no GitHub token.

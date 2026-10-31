@@ -66,6 +66,7 @@ export interface RawComment {
   pull_request_review_id?: number | null;
   user: { login: string };
   body: string;
+  created_at?: string;
 }
 
 export interface Judged {
@@ -81,9 +82,9 @@ export function judge(
   modelOfReview: Map<number, string>,
   botLogin = "github-actions[bot]",
 ): Judged[] {
-  // Signed roots, and unsigned ones in the old label format (see `isWachiFinding`).
+  // Signed roots, and unsigned ones in the old label format from before `LEGACY_CUTOFF` (see `isWachiFinding`).
   const roots = comments.filter(
-    (c) => c.user.login === botLogin && !c.in_reply_to_id && isWachiFinding(c.body),
+    (c) => c.user.login === botLogin && !c.in_reply_to_id && isWachiFinding(c.body, c.created_at),
   );
   return roots.flatMap((root) => {
     const label = parseLabel(root.body);
