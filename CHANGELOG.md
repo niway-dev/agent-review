@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.1](https://github.com/niway-dev/wachi-reviewer/compare/v1.2.0...v1.2.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* accept markers only in the engine footer and end the legacy window ([c884536](https://github.com/niway-dev/wachi-reviewer/commit/c88453694ab948059c1a37ef9619525979f53583)), closes [#39](https://github.com/niway-dev/wachi-reviewer/issues/39) [#40](https://github.com/niway-dev/wachi-reviewer/issues/40)
+* date reviews by submitted_at, the field GitHub review objects carry ([2ea9899](https://github.com/niway-dev/wachi-reviewer/commit/2ea9899cb2227676198ef1d7e38f35adc138b11c)), closes [#40](https://github.com/niway-dev/wachi-reviewer/issues/40)
+* keep the fallback body under the limit when findings fill it before the Summary ([6e6f751](https://github.com/niway-dev/wachi-reviewer/commit/6e6f7513c66ef8a67c199c3afcdb5c9d245c6e23)), closes [#41](https://github.com/niway-dev/wachi-reviewer/issues/41)
+* match the review attempt, classify nested errors, keep the fallback under the limit ([acffca5](https://github.com/niway-dev/wachi-reviewer/commit/acffca5ec7da688e5ce047cee3a288df034c5d72)), closes [#41](https://github.com/niway-dev/wachi-reviewer/issues/41)
+* only the engine can write review markers and signatures ([4f3d426](https://github.com/niway-dev/wachi-reviewer/commit/4f3d426942b1d6c040d04ddc01ab3a1f5e9f0e67))
+* only the engine can write review markers and signatures ([a6d21d9](https://github.com/niway-dev/wachi-reviewer/commit/a6d21d9aa4288db60d3bb6ae7780c32a7cc8a2f5)), closes [#39](https://github.com/niway-dev/wachi-reviewer/issues/39) [#40](https://github.com/niway-dev/wachi-reviewer/issues/40)
+* read review instructions from the base commit ([35415e3](https://github.com/niway-dev/wachi-reviewer/commit/35415e33bf92f1b93bc1d62ef8c70f5d44bb126e))
+* read review instructions from the base commit ([325b696](https://github.com/niway-dev/wachi-reviewer/commit/325b696aa54fd74ce24018ebb3574820ad08dd12)), closes [#10](https://github.com/niway-dev/wachi-reviewer/issues/10)
+* retry transient review errors and fall back only on validation failures ([7d4fe1d](https://github.com/niway-dev/wachi-reviewer/commit/7d4fe1d7d96805f8c6a6ababe1f1768546d8ef44))
+* retry transient review errors and fall back only on validation failures ([d5cb48e](https://github.com/niway-dev/wachi-reviewer/commit/d5cb48e32970425007d88b024443ddbd9feb4082)), closes [#41](https://github.com/niway-dev/wachi-reviewer/issues/41)
+* start the provider outside the head so it cannot load its instructions ([84298bb](https://github.com/niway-dev/wachi-reviewer/commit/84298bbbdf3bc020d3961dee0a02da7fd5486557)), closes [#10](https://github.com/niway-dev/wachi-reviewer/issues/10)
+
 ## [1.2.0](https://github.com/niway-dev/agent-review/compare/v1.1.0...v1.2.0) (2026-10-27)
 
 
