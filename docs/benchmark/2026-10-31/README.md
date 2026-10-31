@@ -44,32 +44,53 @@ its own thread with "Addressed in `29395c3`".
 
 ## Where Wachi misses, and why
 
-All five functional bugs that only Pullfrog caught need code **outside the file being read**:
+Revised after an independent analysis by GPT-6.1 Sol, which reconstructed Wachi's batches with
+v1.2.0's `planBatches` and read Pullfrog's tool calls in order.
 
-1. **Sibling-path parity** (#464, #465, #467). A new path for an existing action skips a side
-   effect that the other paths perform: `markCopySeen` on reveal and drag, or a re-list on
-   `runner.ready` like library-detail does. Pullfrog found two of these by grepping the function
-   the existing path calls (`export function markCopySeen`).
-2. **Consumers outside the diff** (#463). Seeded ids feed a fingerprint in `export-reuse.ts`,
-   which is not in the PR. Wachi's batch summary said the seeding was "correct" without tracing
-   who reads it.
-3. **Lifecycle** (#466, #467). Per-instance ref state that resets on a remount; a loading flag that
-   unmounts the screen on every refresh.
+**It is not mainly a batching problem.** On #464 the new card (`ready-copy-card.tsx`), the
+precedent (the toast in `export-status-cards.tsx`) and the contract (`ready-copies.ts`) were all
+in the same batch. On #465 and #467 the precedent and the contract were in no batch at all: they
+are unchanged files outside the diff (`export-status-cards.tsx` and `ready-copies.ts` on #465;
+`use-local-library.ts`, `export-runner.ts`, `recording-hub.ts` and `library-detail-page.tsx` on
+#467).
 
-Contributing factors seen in Wachi's coverage tables: it uses few turns per batch (3 turns for 22
-files on #464), spending $0.13–$0.42 of its $0.75 batch cap, with 3 to 11 turns per batch. Budget is not the constraint; depth
-of investigation is. Pullfrog used 25–45 turns per review.
+**The difference is the question each reviewer asks.** Wachi checked that the new code was
+locally valid ("uses existing preload APIs", "hooks run in the same order"). Pullfrog followed an
+action to its effect on the app's state and kept one functional question open across several
+reads: "what does the other UI do when the user drags this same copy?", "when the copy finishes,
+how does this screen find out?". Its logs show the sequence: read the precedent, grep the function
+it calls (`markCopySeen`, `library:changed`), read the contract, then write the finding.
+
+Turn count is not the explanation either: Wachi used 7 turns on #465's batch and 8 to 11 on
+#467's. Budget is not the constraint: no batch spent more than $0.42 of its $0.75 cap.
 
 ## Improvements this suggests
 
+Ranked, after Sol's review of the first list.
+
 | # | Change | Catches | Kind |
 | --- | --- | --- | --- |
-| 1 | **Peer call sites in the batch prompt.** For each symbol the diff newly calls or imports from unchanged code, the engine lists its other call sites with a few lines of context (`git grep`, capped). Extends the "precomputed change impact" idea in the [research note](../../research/2026-10-30-pullfrog-and-coderabbit.md) from "who uses what changed" to "who else does what this new code does" | 1 | engine |
-| 2 | **Three review rules in the prompt:** a new path for an existing action keeps the side effects of the existing paths; a value that feeds an identity, hash or cache key is deterministic; state loaded once is refreshed when the background work it depends on finishes, and a refresh does not unmount what the user is editing | 1, 2, 3 | prompt |
-| 3 | **A cross-batch pass.** After the batches, one engine-run pass gets the new entry points and the batch summaries and looks only for contracts that cross batches, with its own small budget | 1, 2 | engine |
-| 4 | **Run on `synchronize` in kaipu-record.** Incremental review exists; Pullfrog's re-reviews found three more valid issues for $2.78. Wait for the rebase-aware rule (memory spec, decision 10) or stacked-branch rebases will re-review whole PRs | later commits | config |
-| 5 | **Repository memory** (`.github/wachi/`, ADR 0006/0007). See below | 1 (repeats) | memory |
-| 6 | **A docs map.** kaipu's ADRs live in `apps/documentation/src/content/docs/architecture/decisions/`, so Wachi's ADR notice (`docs/adr/` only, #5) did not fire when #463 edited ADR 0032 | docs | config |
+| 1 | **A contract check per new action or flow.** For each one the batch answers: what does it change, which equivalent path already exists, and how does the result reach the visible state; for persistent or local state, also what happens on refresh and on leave-and-return. The engine checks that each answer cites code and lists open questions; the model still decides what is a bug | #464, #465, #466, #467 | prompt + engine |
+| 2 | **Precomputed peers for those questions.** The engine finds other call sites of what the new code calls, including qualified calls such as `window.electronAPI.startFileDrag` (not imported, so an import graph misses them) and hooks such as `useLocalLibrary`, with the lines before each call. Shown as candidates to compare, never as rules to copy | #464, #465, part of #467 | engine |
+| 3 | **Small repository memory in the existing focus file.** `.github/agent-review.md` is already in the prompt: add confirmed contracts with the code that proves them (ready-copy actions and `markCopySeen`; Library refresh after an export). The full `.github/wachi/` can come later | repeats of #464, #465, #467 | memory |
+| 4 | **Run on `synchronize`, rebase-aware.** Continuity and fix checking, not a fix for first-review misses. Pullfrog's re-reviews found three more valid issues for $2.78 | later commits | config |
+| 5 | **Align the engine's ADR notice with the docs path.** The focus file already told the model where kaipu's ADRs live; only the engine's notice is anchored to `docs/adr/` (#5), so it did not fire when #463 edited ADR 0032 | docs | engine |
+
+Not recommended now:
+
+- **A cross-batch pass over summaries.** The summaries state the pieces are correct without naming
+  the missed contract; re-reasoning over them can ratify the gap. If 1–3 are not enough, try a
+  flow-investigation pass with tools and access to unchanged code instead.
+- **A minimum number of turns.** It rewards activity, not investigation. Log the tools used, the
+  unchanged files read and the open contracts instead.
+- **Rules worded as universal truths.** "Every identity must be deterministic" is false; ask
+  whether the same content must keep the same identity for reuse, dedup or a cache.
+
+**How to measure:** replay the five PRs at the same heads with model, effort and limits fixed,
+v1.2.0 as baseline, each change alone and combined, several runs per variant. Score detection of
+these bugs, false positives, cost and latency, and whether the model retrieved the right precedent
+and completed the causal chain. Memory written from these reviews is not prior knowledge on these
+same PRs; add new PRs before claiming the change generalises.
 
 ## Would the memory files help?
 
