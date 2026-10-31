@@ -65,6 +65,20 @@ describe("judge and report", () => {
     ]);
   });
 
+  test("takes signed roots, and leaves out another workflow's comment", () => {
+    const signed = "🟠🐛 **Fix · bug: s**\n\n<!-- wachi:finding -->";
+    const found = judge(
+      [
+        { id: 1, user: bot, body: signed },
+        // Same label, but signed as something else: not a finding.
+        { id: 2, user: bot, body: "🟠🐛 **Fix · bug: f**\n\n<!-- wachi:reply -->" },
+        { id: 3, user: bot, body: "Lint failed" },
+      ],
+      new Map(),
+    );
+    expect(found).toEqual([{ severity: "fix", topic: "bug", model: "unknown", verdict: "unjudged" }]);
+  });
+
   test("precision counts only judged findings, a partial one as half", () => {
     const text = report([...rows, { severity: "fix", topic: "bug", model: "m", verdict: "partial" }]);
     expect(text).toContain("| fix | 2 | 0 | 1 | 1 | 0 | 25% |");

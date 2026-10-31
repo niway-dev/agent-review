@@ -55,6 +55,13 @@ tools, its `CLAUDE.md` (the prompt asks the agent to read it), and the focus fil
 try to steer the review (prompt injection); that is what the read-only tools, the budget caps and
 the trust assumption are for.
 
+The model's text cannot forge the engine's state: HTML comments in everything it writes are
+neutralised, so it cannot write the incremental marker (which would make the next run skip
+unreviewed commits) or the hidden signatures the engine uses to tell its reviews and threads from
+other `github-actions[bot]` workflows. Until reviews posted before signatures existed are gone,
+an unsigned review or thread in the old format is still accepted, and another workflow in the
+same repository could imitate it.
+
 The "copy the files" install cannot separate engine and head: the copied engine sits in the
 consumer repository, so on `pull_request` it is the pull request's own copy. It uses the same Bun
 flags, but the reusable workflow is the preferred install.

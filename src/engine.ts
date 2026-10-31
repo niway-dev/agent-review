@@ -131,8 +131,9 @@ const MARKER = /<!-- (?:agent-review|claude-review) sha=([A-Za-z0-9]+) -->/;
 const short = (sha: string) => sha.slice(0, 7);
 /** `🟠📝 **Fix · docs: stale cell**`: both emojis, then the severity, topic and title in words. */
 export const label = (f: Finding) =>
-  `${SEVERITY[f.severity].emoji}${TOPIC[f.topic].emoji} **${SEVERITY[f.severity].word} · ${TOPIC[f.topic].word}: ${f.title}**`;
-const at = (f: { path: string; line: number }) => (f.line > 0 ? `${f.path}:${f.line}` : f.path);
+  `${SEVERITY[f.severity].emoji}${TOPIC[f.topic].emoji} **${SEVERITY[f.severity].word} · ${TOPIC[f.topic].word}: ${neutralise(f.title)}**`;
+const at = (f: { path: string; line: number }) =>
+  neutralise(f.line > 0 ? `${f.path}:${f.line}` : f.path);
 
 /** The default command keyword. A slash command, so writing it notifies no GitHub account. */
 export const DEFAULT_MENTION = "/wachi";
@@ -446,7 +447,49 @@ export function annotateDiff(files: PrFile[]) {
 
 export const marker = (sha: string) => `<!-- agent-review sha=${sha} -->`;
 
-export const readMarker = (body: string) => body.match(MARKER)?.[1] ?? null;
+/**
+ * Hidden signatures the engine writes outside any model text. With `neutralise` on all model text,
+ * the model cannot produce one, so a signed item was written by this engine and not by another
+ * workflow that also posts as `github-actions[bot]`.
+ */
+export const SIGNATURE = {
+  review: "<!-- wachi:review -->",
+  finding: "<!-- wachi:finding -->",
+  reply: "<!-- wachi:reply -->",
+} as const;
+const ANY_SIGNATURE = /<!-- wachi:(?:review|finding|reply) -->/;
+
+/**
+ * Defuses HTML comments in text a model wrote, so it cannot forge the incremental marker or a
+ * signature: `<!--` becomes `&lt;!--` and `-->` becomes `--&gt;`. Markdown shows both as before.
+ */
+export const neutralise = (text: string) =>
+  text.replaceAll("<!--", "&lt;!--").replaceAll("-->", "--&gt;");
+
+/**
+ * The marker the engine wrote: the last one in the body, because the engine appends it as the
+ * final line. Whether the body is the engine's at all is `lastReviewedSha`'s check.
+ */
+export function readMarker(body: string) {
+  const all = [...body.matchAll(new RegExp(MARKER.source, "g"))];
+  return all.at(-1)?.[1] ?? null;
+}
+
+/** The first line of a finding comment written before signatures existed (see `isWachiFinding`). */
+const LEGACY_LABEL =
+  /^(?:\S+ )?(?:\S+ )?\*\*(?:(?:Blocker|Fix|Consider|Info) · [a-z]+:|(?:Should fix|Note) \([a-z]+\):)/;
+
+/**
+ * Whether the first comment of a thread is this engine's finding. Needs the finding signature.
+ * Deprecation window: a comment with no signature at all but the old label format (posted before
+ * signatures existed) still counts, so threads open at the upgrade keep working. Such a comment
+ * is spoofable by any `github-actions[bot]` workflow; drop this branch once those pull requests
+ * are closed.
+ */
+export function isWachiFinding(body: string) {
+  if (body.includes(SIGNATURE.finding)) return true;
+  return !ANY_SIGNATURE.test(body) && LEGACY_LABEL.test(body.split("\n", 1)[0]);
+}
 
 export function coverageGaps(expected: string[], reviewed: string[], skipped: string[]) {
   const accounted = new Set([...reviewed, ...skipped]);
@@ -523,7 +566,7 @@ export function buildReview(input: {
         path: f.path,
         line: f.line,
         side: "RIGHT",
-        body: `${label(f)}\n\n${f.body}`,
+        body: `${label(f)}\n\n${neutralise(f.body)}\n\n${SIGNATURE.finding}`,
       });
     } else outsideDiff.push(f);
   }
@@ -534,7 +577,7 @@ export function buildReview(input: {
   const reasons = new Map(output.files_skipped.map((s) => [s.path, s.reason]));
   const scope = since ? `changes since \`${short(since)}\`` : "the whole pull request";
   const parts: string[] = [];
-  const list = notReviewed.map((f) => `\`${f}\`${reasons.has(f) ? ` (${reasons.get(f)})` : ""}`);
+  const list = notReviewed.map((f) => `\`${f}\`${reasons.has(f) ? ` (${neutralise(reasons.get(f) ?? "")})` : ""}`);
   const fullList = list.join(", ");
   if (notReviewed.length > 0) {
     parts.push(
@@ -548,10 +591,10 @@ export function buildReview(input: {
   parts.push(
     `${countLine(output.findings)}; ${comments.length} on their lines. Reply in a comment's thread to answer it.`,
   );
-  const listed = (f: Finding) => `- ${label(f)} (\`${at(f)}\`): ${f.body}`;
+  const listed = (f: Finding) => `- ${label(f)} (\`${at(f)}\`): ${neutralise(f.body)}`;
   if (outsideDiff.length > 0) parts.push("### Outside the diff", ...outsideDiff.map(listed));
   if (forInfo.length > 0) parts.push("### For your information", ...forInfo.map(listed));
-  parts.push("### Summary", output.summary);
+  parts.push("### Summary", neutralise(output.summary));
   if (batches.length > 0) {
     const rows = batches.map(
       (b) =>
@@ -563,6 +606,7 @@ export function buildReview(input: {
   }
   const batchCount = batches.length > 1 ? ` · ${batches.length} batches` : "";
   parts.push(`<sub>${modelLabel}${batchCount} · $${costUsd.toFixed(2)}</sub>`);
+  parts.push(SIGNATURE.review);
   // The next `review` request starts from this commit, so only a review that covered everything
   // may move it; a scoped or partial one would leave the rest never reviewed.
   if (!scoped && notReviewed.length === 0) parts.push(marker(headSha));
@@ -577,7 +621,7 @@ export function buildReview(input: {
 export function moveCommentsToBody(review: Review): Review {
   if (review.comments.length === 0) return review;
   const moved = review.comments.map(
-    (c) => `- \`${c.path}:${c.line}\`: ${c.body.replace(/\n\n/, " ")}`,
+    (c) => `- \`${c.path}:${c.line}\`: ${c.body.replace(SIGNATURE.finding, "").trim().replace(/\n\n/, " ")}`,
   );
   const section = `### On their lines (GitHub refused them inline)\n\n${moved.join("\n")}`;
   const summary = review.body.indexOf("\n\n### Summary");
@@ -734,13 +778,32 @@ export function listFiles(gh: GhFn, repo: string, pr: number): PrFile[] {
   );
 }
 
+/**
+ * The commit the last Wachi review covered. A review is Wachi's when `github-actions[bot]` wrote
+ * it AND it carries the review signature: that login is shared by every workflow of the
+ * repository, so the login alone proves nothing.
+ *
+ * Deprecation window: reviews posted before signatures existed have only the marker. They count
+ * while they come before the first signed review, so a repository keeps its incremental state
+ * across the upgrade. After the first signed review, an unsigned one is another workflow's and is
+ * ignored. Drop the unsigned branch once no open pull request has an unsigned Wachi review.
+ */
 export function lastReviewedSha(gh: GhFn, repo: string, pr: number) {
   const jq = '.[] | select(.user.login == "github-actions[bot]") | .body | @json';
   const bodies = jsonLines<string>(
     gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/reviews`, "--jq", jq]),
   );
+  return lastEngineMarker(bodies);
+}
+
+/** The marker of the last review the engine wrote, among `github-actions[bot]` bodies in order. */
+export function lastEngineMarker(bodies: string[]) {
+  const firstSigned = bodies.findIndex((b) => b.includes(SIGNATURE.review));
+  const ours = bodies.filter((b, i) =>
+    b.includes(SIGNATURE.review) ? true : firstSigned === -1 || i < firstSigned,
+  );
   return (
-    bodies
+    ours
       .map(readMarker)
       .filter((s): s is string => s !== null)
       .at(-1) ?? null
@@ -778,7 +841,12 @@ const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
  */
 export function openBotThreads(threads: RawThread[]) {
   return threads
-    .filter((t) => !t.isResolved && t.comments.nodes[0]?.author?.login === "github-actions")
+    .filter(
+      (t) =>
+        !t.isResolved &&
+        t.comments.nodes[0]?.author?.login === "github-actions" &&
+        isWachiFinding(t.comments.nodes[0].body),
+    )
     .map((t) => ({
       comment_id: t.comments.nodes[0].databaseId,
       path: t.path,
@@ -1035,7 +1103,7 @@ export function review(deps: Deps, repo: string, pr: number, words: string[]) {
       "POST",
       `repos/${repo}/pulls/${pr}/comments/${r.comment_id}/replies`,
       "-f",
-      `body=**${label}** at \`${short(headSha)}\`: ${r.reply}`,
+      `body=**${label}** at \`${short(headSha)}\`: ${neutralise(r.reply)}\n\n${SIGNATURE.reply}`,
     ]);
   }
 }
@@ -1194,7 +1262,7 @@ nothing else. Write in English.`;
   const result = runProvider(deps, prompt, dir, deps.config.answerBudgetUsd);
   if (result.isError || !result.text)
     throw new Error(`The agent did not answer (${result.terminalReason}).`);
-  const body = `${result.text}\n\n<sub>${deps.provider.modelLabel()} · $${result.costUsd.toFixed(2)}</sub>`;
+  const body = `${neutralise(result.text)}\n\n<sub>${deps.provider.modelLabel()} · $${result.costUsd.toFixed(2)}</sub>`;
   refuseLeak(deps, [body]);
   if (deps.config.dryRun) {
     deps.log(body);

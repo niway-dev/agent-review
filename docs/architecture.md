@@ -45,7 +45,10 @@ All names are in `src/engine.ts` unless a file is given.
 
 1. **Filter.** `listFiles` reads the changed files from GitHub. `lastReviewedSha` finds the last
    `<!-- agent-review sha=... -->` marker (the old `claude-review` marker is still read) in the
-   tool's own reviews; if that commit is behind the head, `compareFiles` narrows the review to what
+   tool's own reviews. A review is the tool's only if `github-actions[bot]` wrote it and it
+   carries the `<!-- wachi:review -->` signature, because every workflow of the repository posts
+   as that same account; the last marker in the body counts. Reviews posted before signatures
+   existed are read by their marker only while they come before the first signed review; if that commit is behind the head, `compareFiles` narrows the review to what
    changed since (`status === "ahead"`), otherwise it reviews the whole pull request. `resolveScope`
    turns `review <paths>` words into paths and ignores words that name no changed file.
    `filterFiles` then drops `DEFAULT_EXCLUDE` (lockfiles, build output, snapshots, source maps,
@@ -124,7 +127,11 @@ All names are in `src/engine.ts` unless a file is given.
    omits empty groups.
    It writes a first line saying whether coverage is complete or partial, the summary, a "Coverage
    by batch" table, a footer with the model label, batch count and cost, and, only for a complete,
-   unscoped review, the marker for the next incremental run. The body is kept under
+   unscoped review, the marker for the next incremental run. Every piece of model text (summary,
+   finding titles and bodies, thread replies, answers) goes through `neutralise`, which turns
+   `<!--` and `-->` into entities, so the model cannot write a marker or a signature. The engine
+   adds the signatures itself: `<!-- wachi:review -->` in the review body, `<!-- wachi:finding -->`
+   in each inline comment, `<!-- wachi:reply -->` in each thread reply. The body is kept under
    `MAX_BODY_CHARS`, shortening only the list of unreviewed files (`fitList`). `refuseLeak` asks
    the provider's `leaksSecret` about every piece of text about to be posted and aborts the
    whole post if one matches. `postReview` sends one review with `event: "COMMENT"`; if GitHub
@@ -140,8 +147,9 @@ All names are in `src/engine.ts` unless a file is given.
    anything else goes to `answer`: one provider call with `AGENT_REVIEW_ANSWER_BUDGET_USD`,
    free-text output, the pull request metadata and full diff in a scratch directory, the same leak
    check, posted as a pull request comment. Thread replies work through the review path: with a
-   previous marker, `openThreads` fetches the tool's unresolved threads and `openBotThreads`
-   keeps only replies from `OWNER`, `MEMBER` or `COLLABORATOR`, so a stranger's reply on a public
+   previous marker, `openThreads` fetches the tool's unresolved threads (first comment by `github-actions` and
+   carrying the finding signature, or, during the deprecation window, an unsigned comment in the
+   old label format) and `openBotThreads` keeps only replies from `OWNER`, `MEMBER` or `COLLABORATOR`, so a stranger's reply on a public
    repository never reaches the model. `assignThreads` hands each thread to the batch that holds
    its file. *Why:* the operator gate is enforced twice (workflow and CLI) because only one of
    them can fail loudly.
@@ -273,6 +281,10 @@ and the copy-the-files install. The two sets must stay equal.
 - The model never approves or requests changes. The review event is always `COMMENT`.
 - The incremental marker is written only when the review is complete and unscoped, that is, when
   every file is accounted for.
+- Model text is neutralised (`neutralise`) before it is posted, and ownership of a review or a
+  thread is the `github-actions[bot]` login plus an engine-written signature, never the login
+  alone. The unsigned legacy branches (`lastEngineMarker`, `isWachiFinding`) are a deprecation
+  window for items posted before signatures existed.
 - The reviewed head is never the engine's working directory, and the engine never executes
   anything from it.
 - The agent gets read tools only, an allowlisted environment and no GitHub token.
