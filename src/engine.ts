@@ -453,6 +453,7 @@ export const marker = (sha: string) => `<!-- agent-review sha=${sha} -->`;
  * workflow that also posts as `github-actions[bot]`.
  */
 const SIGNATURE_REVIEW_SOURCE = "<!-- wachi:review -->";
+const ATTEMPT_SOURCE = "<!-- wachi:attempt id=[0-9a-f-]{36} -->";
 export const SIGNATURE = {
   review: SIGNATURE_REVIEW_SOURCE,
   finding: "<!-- wachi:finding -->",
@@ -476,11 +477,14 @@ export const neutralise = (text: string) =>
  *
  *     <!-- agent-review sha=… -->
  *
- * and the marker is read only as the very last line, right after the signature. Anything else
+ * and the marker is read only as the last line, right after the signature (`postReview` then adds
+ * its `<!-- wachi:attempt id=… -->` line after it, which is allowed). Anything else
  * (a marker in the middle of the body, in a file name, in a list) is not the engine's footer, even
  * if some string slipped past `neutralise`.
  */
-const SIGNED_FOOTER = new RegExp(`\\n\\n${SIGNATURE_REVIEW_SOURCE}\\n\\n${MARKER_SOURCE}$`);
+const SIGNED_FOOTER = new RegExp(
+  `\\n\\n${SIGNATURE_REVIEW_SOURCE}\\n\\n${MARKER_SOURCE}(?:\\n\\n${ATTEMPT_SOURCE})?$`,
+);
 /** A review written before signatures existed ended with `</sub>`, a blank line and the marker. */
 const LEGACY_FOOTER = new RegExp(`</sub>\\n\\n${MARKER_SOURCE}$`);
 
@@ -663,19 +667,81 @@ export function buildReview(input: {
   return { body: body.replace(fullList, () => fitList(list, Math.max(room, 0))), comments };
 }
 
-/** For a review GitHub refused (422): every inline finding moves to the body. */
+/**
+ * For a review GitHub refused with a validation 422: every inline finding moves to the body. The
+ * result stays within `MAX_BODY_CHARS`: the room for the heading and the omission note is reserved
+ * first, the moved list is cut to what is left and ends with "N more not shown", and when the rest
+ * of the body is itself near the limit, its Summary and coverage table are trimmed before anything
+ * else, so the coverage line, the marker and the signature are never dropped. The count line stops
+ * claiming inline comments, since none are left inline.
+ */
 export function moveCommentsToBody(review: Review): Review {
   if (review.comments.length === 0) return review;
   const moved = review.comments.map(
     (c) => `- \`${neutralise(c.path)}:${c.line}\`: ${c.body.replace(SIGNATURE.finding, "").trim().replace(/\n\n/, " ")}`,
   );
-  const section = `### On their lines (GitHub refused them inline)\n\n${moved.join("\n")}`;
-  const summary = review.body.indexOf("\n\n### Summary");
-  const body =
-    summary === -1
-      ? `${review.body}\n\n${section}`
-      : `${review.body.slice(0, summary)}\n\n${section}${review.body.slice(summary)}`;
-  return { body, comments: [] };
+  const base = review.body.replace(
+    /; \d+ on their lines\. Reply in a comment's thread to answer it\./,
+    `; ${moved.length} listed below, because GitHub would not anchor them on their lines.`,
+  );
+  const heading = "### On their lines (GitHub refused them inline)";
+  const note = (left: number) => `- … and ${left} more not shown (GitHub refused them inline).`;
+  const summary = base.indexOf("\n\n### Summary");
+  let head = summary === -1 ? base : base.slice(0, summary);
+  let tail = summary === -1 ? "" : base.slice(summary);
+  // The section is "\n\n<heading>\n\n<items joined by \n>" between head and tail; at the least it
+  // holds the heading and the note.
+  const overhead = 4 + heading.length;
+  const overflow = head.length + tail.length + overhead + note(moved.length).length - MAX_BODY_CHARS;
+  if (overflow > 0) tail = trimMiddle(tail, overflow);
+  // Findings listed before the Summary can fill the body on their own; then the start is cut too.
+  const still = head.length + tail.length + overhead + note(moved.length).length - MAX_BODY_CHARS;
+  if (still > 0) head = trimHead(head, still);
+  const room = MAX_BODY_CHARS - head.length - tail.length - overhead;
+  const kept: string[] = [];
+  let used = 0;
+  for (const [i, item] of moved.entries()) {
+    const next = used + (kept.length > 0 ? 1 : 0) + item.length;
+    const left = moved.length - (i + 1);
+    if (next + (left > 0 ? 1 + note(left).length : 0) > room) break;
+    kept.push(item);
+    used = next;
+  }
+  if (kept.length < moved.length) kept.push(note(moved.length - kept.length));
+  const section = `${heading}\n\n${kept.join("\n")}`;
+  return { body: `${head}\n\n${section}${tail}`, comments: [] };
+}
+
+/**
+ * Makes the start of a review body (coverage line, count line, the lists before `### Summary`) at
+ * least `cut` characters shorter, at a line break, so the coverage line survives whenever it can.
+ */
+function trimHead(head: string, cut: number) {
+  const trimmed = "\n\n(Trimmed: this review is at GitHub's size limit.)";
+  const target = Math.max(head.length - cut - trimmed.length, 0);
+  const at = head.lastIndexOf("\n", target);
+  return `${head.slice(0, at > 0 ? at : target)}${trimmed}`;
+}
+
+/**
+ * Makes the part of a review body between the first findings and the footer (`### Summary`, the
+ * coverage table) at least `cut` characters shorter. The footer (`<sub>` line, signature, marker)
+ * is kept whole. The coverage table goes first, then the Summary is cut at a line break.
+ */
+function trimMiddle(tail: string, cut: number) {
+  const sub = tail.lastIndexOf("\n\n<sub>");
+  const footerAt = sub !== -1 ? sub : Math.max(tail.lastIndexOf(`\n\n${SIGNATURE.review}`), 0);
+  let middle = tail.slice(0, footerAt);
+  const footer = tail.slice(footerAt);
+  const trimmed = "\n\n(Trimmed: this review is at GitHub's size limit.)";
+  const target = middle.length - cut - trimmed.length;
+  const details = middle.indexOf("\n\n<details>");
+  if (details !== -1) middle = middle.slice(0, details);
+  if (middle.length > target) {
+    const cutAt = middle.lastIndexOf("\n", Math.max(target, 0));
+    middle = middle.slice(0, Math.max(cutAt, 0));
+  }
+  return `${middle}${trimmed}${footer}`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -788,9 +854,62 @@ function repoFocus(warn: (line: string) => void, repoDir: string) {
 /** Runs `gh` and returns stdout; swapped for a stub in tests. */
 export type GhFn = (args: string[], input?: string) => string;
 
+/** A failed `gh` call, with what GitHub answered when it was an API error. */
+export class GhError extends Error {
+  constructor(
+    message: string,
+    /** The HTTP status of the API response, or null when `gh` failed without one (network, auth setup). */
+    readonly status: number | null,
+    /** GitHub's own message, without `gh`'s wrapping. Empty when there was none. */
+    readonly ghMessage: string,
+    /** The `errors` array of the response, as GitHub sent it. Empty when there was none. */
+    readonly errors: readonly unknown[] = [],
+  ) {
+    super(message);
+    this.name = "GhError";
+  }
+}
+
+/** The text of each entry of a response's `errors` array: `{message}` objects and plain strings. */
+export function errorMessages(errors: readonly unknown[]) {
+  return errors.flatMap((e) => {
+    if (typeof e === "string") return [e];
+    const m = (e as { message?: unknown } | null)?.message;
+    return typeof m === "string" ? [m] : [];
+  });
+}
+
+/**
+ * Reads the status, message and `errors` array out of what `gh api` printed. On an API error `gh`
+ * writes `gh: <message> (HTTP <status>)` to stderr and the response JSON to stdout; for a body it
+ * cannot read it writes `HTTP <status>: <text> (<url>)`. Anything else (no network, bad token
+ * setup) has no status. The top-level message can be generic ("Validation Failed") while the real
+ * reason is only in `errors[].message`, so the array is kept.
+ */
+export function parseGhFailure(
+  stderr: string,
+  stdout = "",
+): { status: number | null; message: string; errors: unknown[] } {
+  let message = "";
+  let errors: unknown[] = [];
+  try {
+    const body = JSON.parse(stdout);
+    if (typeof body?.message === "string") message = body.message;
+    if (Array.isArray(body?.errors)) errors = body.errors;
+  } catch {}
+  const wrapped = stderr.match(/^gh: (.*?) \(HTTP (\d{3})\)/m);
+  if (wrapped) return { status: Number(wrapped[2]), message: message || wrapped[1], errors };
+  const plain = stderr.match(/HTTP (\d{3}): (.*?)(?: \(https?:\/\/\S+\))?$/m);
+  if (plain) return { status: Number(plain[1]), message: message || plain[2], errors };
+  return { status: null, message, errors };
+}
+
 export const defaultGh: GhFn = (args, input) => {
   const run = spawnSync("gh", args, { input, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  if (run.status !== 0) throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${run.stderr}`);
+  if (run.status !== 0) {
+    const { status, message, errors } = parseGhFailure(run.stderr ?? "", run.stdout ?? "");
+    throw new GhError(`gh ${args.slice(0, 3).join(" ")} failed: ${run.stderr}`, status, message, errors);
+  }
   return run.stdout;
 };
 
@@ -807,7 +926,11 @@ export interface Deps {
   repoDir?: string;
   log: (line: string) => void;
   warn: (line: string) => void;
+  /** Waits `ms` between review POST retries; swapped for a no-op in tests. Default: blocks the thread. */
+  sleep?: (ms: number) => void;
 }
+
+const blockingSleep = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 const jsonLines = <T>(text: string) =>
   text
@@ -928,23 +1051,87 @@ export function openThreads(gh: GhFn, repo: string, pr: number) {
   return openBotThreads(JSON.parse(raw).data.repository.pullRequest.reviewThreads.nodes);
 }
 
-function postReview(deps: Deps, repo: string, pr: number, headSha: string, review: Review) {
+/** Waits before the 1st and 2nd retry of a review POST GitHub answered with a transient error. */
+export const REVIEW_RETRY_DELAYS_MS = [1_000, 3_000];
+
+const ghStatus = (error: unknown) => (error instanceof GhError ? error.status : null);
+
+/**
+ * GitHub's generic "An internal error occurred, please try again." 422: the review itself is fine.
+ * The text is often only in `errors[].message`, under a top-level "Validation Failed".
+ */
+export function isTransientReviewError(error: unknown) {
+  if (!(error instanceof GhError) || error.status !== 422) return false;
+  const texts = [error.ghMessage, ...errorMessages(error.errors)];
+  if (texts.every((t) => !t)) texts.push(error.message);
+  return texts.some((t) => /internal error occurred, please try again/i.test(t));
+}
+
+/** The line the engine adds to every body it posts, unique to one `postReview` call. */
+export const attemptFooter = (id: string) => `<!-- wachi:attempt id=${id} -->`;
+
+/**
+ * Whether the review of THIS attempt is on the pull request: a review by `github-actions[bot]`
+ * whose body carries this attempt's id. An older review of the same head, even a signed one, is
+ * not it. Only the engine writes the line (`neutralise` defuses any other), so the id cannot be
+ * forged by a model or a file name.
+ */
+function reviewLanded(deps: Deps, repo: string, pr: number, attemptId: string) {
+  const jq = '.[] | select(.user.login == "github-actions[bot]") | {body} | @json';
+  const reviews = jsonLines<{ body: string | null }>(
+    deps.gh(["api", "--paginate", `repos/${repo}/pulls/${pr}/reviews`, "--jq", jq]),
+  );
+  return reviews.some((r) => (r.body ?? "").trimEnd().endsWith(attemptFooter(attemptId)));
+}
+
+export function postReview(deps: Deps, repo: string, pr: number, headSha: string, review: Review) {
   if (deps.config.dryRun) {
     deps.log(`--- review at ${short(headSha)} ---\n${review.body}`);
     for (const c of review.comments) deps.log(`--- ${c.path}:${c.line} ---\n${c.body}`);
     return;
   }
+  const sleep = deps.sleep ?? blockingSleep;
+  // One id for this call: the retries and the fallback are the same attempt, and an older review
+  // of the same head does not carry it.
+  const attemptId = crypto.randomUUID();
   const send = (r: Review) =>
     deps.gh(
       ["api", "-X", "POST", `repos/${repo}/pulls/${pr}/reviews`, "--input", "-"],
-      JSON.stringify({ commit_id: headSha, event: "COMMENT", body: r.body, comments: r.comments }),
+      JSON.stringify({
+        commit_id: headSha,
+        event: "COMMENT",
+        body: `${r.body}\n\n${attemptFooter(attemptId)}`,
+        comments: r.comments,
+      }),
     );
+  // A transient error may hide a POST that did land, so look before each retry.
+  const sendWithRetry = (r: Review) => {
+    for (let retry = 0; ; retry++) {
+      try {
+        send(r);
+        return;
+      } catch (error) {
+        const delay = REVIEW_RETRY_DELAYS_MS[retry];
+        if (!isTransientReviewError(error) || delay === undefined) throw error;
+        deps.warn(`GitHub answered with a transient error; retrying in ${delay / 1000} s. ${error}`);
+        sleep(delay);
+        if (reviewLanded(deps, repo, pr, attemptId)) {
+          deps.warn("The review was posted despite the error; not posting it again.");
+          return;
+        }
+      }
+    }
+  };
   try {
-    send(review);
+    sendWithRetry(review);
   } catch (error) {
-    if (review.comments.length === 0) throw error;
+    // Only a validation 422 (a line GitHub cannot anchor) justifies a different review. Auth,
+    // permission, network, rate limit and an exhausted transient error fail loudly instead.
+    if (ghStatus(error) !== 422 || isTransientReviewError(error) || review.comments.length === 0) {
+      throw error;
+    }
     deps.warn(`GitHub refused the inline comments; posting them in the body. ${error}`);
-    send(moveCommentsToBody(review));
+    sendWithRetry(moveCommentsToBody(review));
   }
 }
 

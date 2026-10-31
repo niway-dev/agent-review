@@ -138,8 +138,19 @@ All names are in `src/engine.ts` unless a file is given.
    in each inline comment, `<!-- wachi:reply -->` in each thread reply. The body is kept under
    `MAX_BODY_CHARS`, shortening only the list of unreviewed files (`fitList`). `refuseLeak` asks
    the provider's `leaksSecret` about every piece of text about to be posted and aborts the
-   whole post if one matches. `postReview` sends one review with `event: "COMMENT"`; if GitHub
-   refuses the inline comments, `moveCommentsToBody` retries with them in the body. Replies to
+   whole post if one matches. `postReview` sends one review with `event: "COMMENT"`. `gh` failures
+   are `GhError`s carrying the HTTP status, GitHub's message and the `errors` array of the response
+   (`parseGhFailure`). A 422 saying "An internal error occurred, please try again", at the top
+   level or in `errors[].message` under a generic "Validation Failed", is transient: the same
+   review is retried after 1 s and 3 s. Each `postReview` call adds a unique
+   `<!-- wachi:attempt id=… -->` line as the last line of the body, and before each retry the
+   engine looks for a `github-actions[bot]` review carrying that id, because the POST may have
+   landed; an older review of the same commit does not count. Only a validation 422 (a line
+   GitHub cannot anchor) makes `moveCommentsToBody` post the comments in the body: it reserves
+   room for the heading and an "N more not shown" note, cuts the list to fit and, if the rest of
+   the body is near the limit, trims the Summary and coverage table first, so the result never
+   exceeds `MAX_BODY_CHARS`. Any other error (auth, permission, rate limit, network) is rethrown:
+   no degraded review is posted. Replies to
    open threads are posted only for comment ids the engine itself handed over. *Why:* the model
    cannot approve, request changes, invent a thread id or move the incremental marker past a file
    nobody read.
