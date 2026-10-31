@@ -66,7 +66,7 @@ Turn count is not the explanation either: Wachi used 7 turns on #465's batch and
 
 ## What Pullfrog misses, and why
 
-The other direction matters as much. Pullfrog missed 15 of Wachi's 17 valid findings, including
+The other direction matters as much. Pullfrog's first reviews overlap none of Wachi's 17 valid findings, including
 one of #463's two serious bugs.
 
 - **It reviews depth-first and stops.** It follows a few functional questions to the end and
