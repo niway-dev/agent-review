@@ -687,13 +687,16 @@ export function moveCommentsToBody(review: Review): Review {
   const heading = "### On their lines (GitHub refused them inline)";
   const note = (left: number) => `- … and ${left} more not shown (GitHub refused them inline).`;
   const summary = base.indexOf("\n\n### Summary");
-  const head = summary === -1 ? base : base.slice(0, summary);
+  let head = summary === -1 ? base : base.slice(0, summary);
   let tail = summary === -1 ? "" : base.slice(summary);
   // The section is "\n\n<heading>\n\n<items joined by \n>" between head and tail; at the least it
   // holds the heading and the note.
   const overhead = 4 + heading.length;
   const overflow = head.length + tail.length + overhead + note(moved.length).length - MAX_BODY_CHARS;
   if (overflow > 0) tail = trimMiddle(tail, overflow);
+  // Findings listed before the Summary can fill the body on their own; then the start is cut too.
+  const still = head.length + tail.length + overhead + note(moved.length).length - MAX_BODY_CHARS;
+  if (still > 0) head = trimHead(head, still);
   const room = MAX_BODY_CHARS - head.length - tail.length - overhead;
   const kept: string[] = [];
   let used = 0;
@@ -707,6 +710,17 @@ export function moveCommentsToBody(review: Review): Review {
   if (kept.length < moved.length) kept.push(note(moved.length - kept.length));
   const section = `${heading}\n\n${kept.join("\n")}`;
   return { body: `${head}\n\n${section}${tail}`, comments: [] };
+}
+
+/**
+ * Makes the start of a review body (coverage line, count line, the lists before `### Summary`) at
+ * least `cut` characters shorter, at a line break, so the coverage line survives whenever it can.
+ */
+function trimHead(head: string, cut: number) {
+  const trimmed = "\n\n(Trimmed: this review is at GitHub's size limit.)";
+  const target = Math.max(head.length - cut - trimmed.length, 0);
+  const at = head.lastIndexOf("\n", target);
+  return `${head.slice(0, at > 0 ? at : target)}${trimmed}`;
 }
 
 /**

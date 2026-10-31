@@ -1171,6 +1171,20 @@ describe("moveCommentsToBody limits", () => {
     }
   });
 
+  test("findings listed before the Summary that fill the body are cut too", () => {
+    const listed = Array.from({ length: 400 }, (_, i) => `- outside ${i}: ${"z".repeat(140)}`).join("\n");
+    const filled = body().replace("### Summary", `### Outside the diff\n\n${listed}\n\n### Summary`);
+    const big = filled.length > MAX_BODY_CHARS ? filled : filled.replace("Ok.", `Ok.${"y".repeat(MAX_BODY_CHARS - filled.length)}`);
+    const comments = [{ path: "a.ts", line: 1, side: "RIGHT" as const, body: `Title\n\n${"x".repeat(500)}` }];
+    for (const input of [big, filled]) {
+      const moved = moveCommentsToBody({ body: input, comments });
+      expect(moved.body.length).toBeLessThanOrEqual(MAX_BODY_CHARS);
+      expect(moved.body).toContain("all 2 files reviewed");
+      expect(moved.body).toContain(SIGNATURE.review);
+      expect(moved.body.endsWith(marker("abc1234def"))).toBe(true);
+    }
+  });
+
   test("an oversized moved list is cut and keeps the coverage line, marker and signature", () => {
     const comments = Array.from({ length: 200 }, (_, i) => ({
       path: "a.ts",
